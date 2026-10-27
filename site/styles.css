@@ -92,6 +92,16 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
   font: inherit; color: var(--tinta); background: var(--superficie); border: 1px solid var(--borde);
   border-radius: 6px; padding: 5px 8px;
 }
+.filtro-mes { display: inline-flex; align-items: center; gap: 6px; color: var(--tinta-2); font-size: 0.9rem; }
+.filtro-mes select {
+  font: inherit; color: var(--tinta); background: var(--superficie); border: 1px solid var(--borde);
+  border-radius: 6px; padding: 5px 8px;
+}
+.aviso {
+  margin: 0 0 16px; padding: 10px 14px; border-left: 3px solid var(--acento); border-radius: 6px;
+  background: var(--superficie); color: var(--tinta-2); font-size: 0.9rem;
+}
+.aviso strong { color: var(--tinta); }
 .presets { display: inline-flex; border: 1px solid var(--borde); border-radius: 8px; overflow: hidden; }
 .presets button {
   font: inherit; font-size: 0.9rem; color: var(--tinta-2); background: var(--superficie); border: 0;

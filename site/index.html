@@ -33,7 +33,7 @@
     <!-- Serie diaria -->
     <section id="vista-diario" class="vista activa">
       <div class="filtros">
-        <div class="presets" role="group" aria-label="Rango de fechas">
+        <div class="presets" id="presets-diario" role="group" aria-label="Rango de fechas">
           <button type="button" data-rango="30">30 días</button>
           <button type="button" data-rango="90" class="activo">90 días</button>
           <button type="button" data-rango="365">1 año</button>
@@ -82,19 +82,27 @@
     <!-- Serie mensual -->
     <section id="vista-mensual" class="vista">
       <div class="filtros">
-        <label>Desde <select id="anio-desde"></select></label>
-        <label>Hasta <select id="anio-hasta"></select></label>
+        <div class="presets" id="presets-mensual" role="group" aria-label="Período">
+          <button type="button" data-meses="12">12 meses</button>
+          <button type="button" data-meses="60">5 años</button>
+          <button type="button" data-meses="todo" class="activo">Todo</button>
+        </div>
+        <span class="filtro-mes">Desde
+          <select id="mes-desde" aria-label="Mes desde"></select><select id="anio-desde" aria-label="Año desde"></select></span>
+        <span class="filtro-mes">Hasta
+          <select id="mes-hasta" aria-label="Mes hasta"></select><select id="anio-hasta" aria-label="Año hasta"></select></span>
       </div>
+      <p class="aviso" id="aviso-mensual"></p>
       <div class="tiles" id="tiles-mensual"></div>
       <article class="tarjeta">
-        <header><h2>Producción neta mensual por tecnología <span class="unidad">GWh</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-mensual">Ver tabla</button></header>
+        <header><h2>Producción neta mensual por tecnología <span class="unidad" id="periodo-mensual">GWh</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-mensual">Ver tabla</button></header>
         <div id="g-mensual" class="grafico"></div>
       </article>
       <article class="tarjeta">
         <header><h2>Producción anual <span class="unidad">GWh</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-anual">Ver tabla</button></header>
         <div id="g-anual" class="grafico grafico-bajo"></div>
       </article>
-      <p class="nota">Fuente: indicadores de <a href="https://www.cenace.gob.ec/energia-neta-producida-por-las-centrales-de-generacion-gwh/" rel="noopener">energía neta producida</a> de CENACE. "No convencional" agrupa biogás, biomasa, eólica y fotovoltaica. El año en curso está incompleto.</p>
+      <p class="nota">Fuente: indicadores de <a href="https://www.cenace.gob.ec/energia-neta-producida-por-las-centrales-de-generacion-gwh/" rel="noopener">energía neta producida</a> de CENACE. "No convencional" agrupa biogás, biomasa, eólica y fotovoltaica. Esta serie oficial no incluye importaciones ni exportaciones.</p>
     </section>
 
     <!-- Datos -->

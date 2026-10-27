@@ -3,7 +3,7 @@
 
 const estado = {
   resumen: [], curva: [], detalle: [], mensual: [], anual: [], meta: null,
-  rango: { desde: null, hasta: null }, dia: null, anios: { desde: null, hasta: null },
+  rango: { desde: null, hasta: null }, dia: null, periodo: { desde: null, hasta: null },
   vista: "diario", tablas: {}, modoTabla: {},
 };
 
@@ -48,6 +48,7 @@ const isoDe = (d) => d.toISOString().slice(0, 10);
 const fechaLarga = (iso) => new Intl.DateTimeFormat("es-EC", {
   weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(aFecha(iso));
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+const MESES_LARGOS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
 function css(variable) {
   return getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
@@ -108,7 +109,7 @@ function registrarLocale() {
     format: {
       days: ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"],
       shortDays: ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"],
-      months: ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"],
+      months: MESES_LARGOS,
       shortMonths: MESES, date: "%d/%m/%Y", decimal: ",", thousands: ".",
     },
   });
@@ -294,9 +295,23 @@ function renderDia() {
 
 // ---------------------------------------------------------------- vista: serie mensual
 
+const claveMes = (f) => `${f.anio}-${String(f.mes).padStart(2, "0")}`;
+const nombreMes = (clave) => `${MESES_LARGOS[+clave.slice(5) - 1]} de ${clave.slice(0, 4)}`;
+const listaMeses = (claves) => {
+  const mismoAnio = claves.every((c) => c.slice(0, 4) === claves[0].slice(0, 4));
+  const nombres = claves.map((c) => (mismoAnio ? MESES_LARGOS[+c.slice(5) - 1] : nombreMes(c)));
+  const texto = nombres.length > 1 ? `${nombres.slice(0, -1).join(", ")} y ${nombres[nombres.length - 1]}` : nombres[0];
+  return mismoAnio ? `${texto} de ${claves[0].slice(0, 4)}` : texto;
+};
+const mesCorto = (clave) => `${MESES[+clave.slice(5) - 1]} ${clave.slice(0, 4)}`;
+const restarMeses = (clave, n) => {
+  const total = +clave.slice(0, 4) * 12 + (+clave.slice(5) - 1) - n;
+  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, "0")}`;
+};
+
 function renderMensual() {
-  const { desde, hasta } = estado.anios;
-  const filas = estado.mensual.filter((f) => +f.anio >= desde && +f.anio <= hasta);
+  const { desde, hasta } = estado.periodo;
+  const filas = estado.mensual.filter((f) => claveMes(f) >= desde && claveMes(f) <= hasta);
   const noconv = (f) => ["biogas_gwh", "biomasa_gwh", "eolica_gwh", "fotovoltaica_gwh"].reduce((s, k) => s + (num(f[k]) || 0), 0);
   const x = filas.map((f) => `${f.anio}-${String(f.mes).padStart(2, "0")}-01`);
   const capas = [
@@ -319,27 +334,49 @@ function renderMensual() {
     filas: [...filas].reverse(),
   });
 
-  // Últimos 12 meses frente a los 12 anteriores (independiente del filtro de años).
-  const todos = estado.mensual;
-  const ult = todos.slice(-12), prev = todos.slice(-24, -12);
+  // Hasta qué mes hay datos: siempre visible, independiente del filtro.
+  const primero = claveMes(estado.mensual[0]), ultimo = claveMes(estado.mensual[estado.mensual.length - 1]);
+  const hoy = new Date().toISOString().slice(0, 7);
+  const pendientes = [];
+  for (let m = restarMeses(hoy, 1); m > ultimo; m = restarMeses(m, 1)) pendientes.unshift(m);
+  document.getElementById("aviso-mensual").innerHTML =
+    `Datos oficiales disponibles de <strong>${nombreMes(primero)}</strong> a <strong>${nombreMes(ultimo)}</strong>.` +
+    (pendientes.length ? ` CENACE todavía no publica ${listaMeses(pendientes)}.` : "");
+  document.getElementById("periodo-mensual").textContent =
+    `GWh · ${mesCorto(desde)} – ${mesCorto(hasta)}`;
+
+  // Indicadores del período elegido, comparados con el mismo período un año antes.
   const sum = (a, k) => a.reduce((s, f) => s + (num(f[k]) || 0), 0);
-  const t12 = sum(ult, "total_gwh"), p12 = sum(prev, "total_gwh");
-  const ultimo = todos[todos.length - 1];
+  const total = sum(filas, "total_gwh");
+  const previas = estado.mensual.filter((f) => claveMes(f) >= restarMeses(desde, 12) && claveMes(f) <= restarMeses(hasta, 12));
+  const comparable = previas.length === filas.length && filas.length > 0;
+  const variacion = comparable ? (100 * (total - sum(previas, "total_gwh"))) / sum(previas, "total_gwh") : null;
   document.getElementById("tiles-mensual").replaceChildren(
-    tile("Producción últimos 12 meses", fmt(t12, 0), "GWh",
-      ultimo ? `hasta ${MESES[ultimo.mes - 1]} ${ultimo.anio} · ${p12 ? (t12 >= p12 ? "+" : "") + fmt((100 * (t12 - p12)) / p12, 1) + " % interanual" : ""}` : ""),
-    tile("Hidroeléctrica (12 meses)", pct(sum(ult, "hidroelectrica_gwh"), t12), "", `${fmt(sum(ult, "hidroelectrica_gwh"), 0)} GWh`),
-    tile("Térmica (12 meses)", pct(sum(ult, "termica_gwh"), t12), "", `${fmt(sum(ult, "termica_gwh"), 0)} GWh`),
-    tile("Último mes publicado", ultimo ? `${MESES[ultimo.mes - 1]} ${ultimo.anio}` : "—", "", ultimo ? `${fmt(num(ultimo.total_gwh), 0)} GWh` : ""),
+    tile("Producción del período", fmt(total, 0), "GWh",
+      `${mesCorto(desde)} – ${mesCorto(hasta)} · ${filas.length} ${filas.length === 1 ? "mes" : "meses"}`),
+    tile("Hidroeléctrica", pct(sum(filas, "hidroelectrica_gwh"), total), "", `${fmt(sum(filas, "hidroelectrica_gwh"), 0)} GWh`),
+    tile("Térmica", pct(sum(filas, "termica_gwh"), total), "", `${fmt(sum(filas, "termica_gwh"), 0)} GWh`),
+    tile("No convencional", pct(filas.reduce((s, f) => s + noconv(f), 0), total), "",
+      `${fmt(filas.reduce((s, f) => s + noconv(f), 0), 0)} GWh`),
+    tile("Variación interanual", variacion == null ? "—" : `${variacion >= 0 ? "+" : ""}${fmt(variacion, 1)} %`, "",
+      comparable ? `vs ${mesCorto(restarMeses(desde, 12))} – ${mesCorto(restarMeses(hasta, 12))}` : "sin período previo comparable"),
   );
 
-  const anual = estado.anual.filter((f) => +f.anio >= desde && +f.anio <= hasta);
-  const anioActual = String(new Date().getUTCFullYear());
+  // Producción anual oficial; los años con menos de 12 meses publicados se marcan como parciales.
+  const mesesPorAnio = {};
+  for (const f of estado.mensual) (mesesPorAnio[f.anio] ||= []).push(+f.mes);
+  const anual = estado.anual.filter((f) => f.anio >= desde.slice(0, 4) && f.anio <= hasta.slice(0, 4));
+  const parcial = (anio) => (mesesPorAnio[anio]?.length ?? 0) < 12;
+  const rotulo = (anio) => `${MESES[Math.min(...mesesPorAnio[anio]) - 1]}–${MESES[Math.max(...mesesPorAnio[anio]) - 1]}`;
   dibujar("g-anual", [{
     type: "bar", name: "Producción", x: anual.map((f) => f.anio), y: anual.map((f) => num(f.produccion_gwh)),
-    marker: { color: anual.map((f) => (f.anio === anioActual ? css("--eje") : css("--tinta-2"))) },
-    hovertemplate: "%{x}: %{y:,.0f} GWh<extra></extra>",
-  }], layoutBase({ showlegend: false, hovermode: "closest", xaxis: { ...layoutBase().xaxis, type: "category" } }), {
+    marker: { color: anual.map((f) => (parcial(f.anio) ? css("--eje") : css("--tinta-2"))) },
+    text: anual.map((f) => (parcial(f.anio) && mesesPorAnio[f.anio] ? `${rotulo(f.anio)} (parcial)` : "")),
+    textposition: "outside", cliponaxis: false, textfont: { color: css("--tinta-2"), size: 11 },
+    customdata: anual.map((f) => (parcial(f.anio) && mesesPorAnio[f.anio] ? ` (${rotulo(f.anio)}, parcial)` : "")),
+    hovertemplate: "%{x}%{customdata}: %{y:,.0f} GWh<extra></extra>",
+  }], layoutBase({ showlegend: false, hovermode: "closest", margin: { l: 56, r: 12, t: 24, b: 40 },
+    xaxis: { ...layoutBase().xaxis, type: "category" } }), {
     columnas: [
       { clave: "anio", titulo: "Año" },
       { clave: "produccion_gwh", titulo: "Producción (GWh)", fmt: (v) => fmt(num(v), 0) },
@@ -390,7 +427,7 @@ function fijarRango(dias) {
   estado.rango = { desde, hasta };
   document.getElementById("desde").value = desde;
   document.getElementById("hasta").value = hasta;
-  document.querySelectorAll(".presets button").forEach((b) => b.classList.toggle("activo", b.dataset.rango === String(dias)));
+  document.querySelectorAll("#presets-diario button").forEach((b) => b.classList.toggle("activo", b.dataset.rango === String(dias)));
 }
 
 function iniciarControles() {
@@ -404,12 +441,12 @@ function iniciarControles() {
     render();
   }));
 
-  document.querySelectorAll(".presets button").forEach((b) => b.addEventListener("click", () => { fijarRango(b.dataset.rango); render(); }));
+  document.querySelectorAll("#presets-diario button").forEach((b) => b.addEventListener("click", () => { fijarRango(b.dataset.rango); render(); }));
   for (const id of ["desde", "hasta"]) {
     document.getElementById(id).addEventListener("change", (e) => {
       if (!e.target.value) return;
       estado.rango[id] = e.target.value;
-      document.querySelectorAll(".presets button").forEach((b) => b.classList.remove("activo"));
+      document.querySelectorAll("#presets-diario button").forEach((b) => b.classList.remove("activo"));
       render();
     });
   }
@@ -425,13 +462,48 @@ function iniciarControles() {
   document.getElementById("dia-anterior").addEventListener("click", () => mover(-1));
   document.getElementById("dia-siguiente").addEventListener("click", () => mover(1));
 
-  const anios = [...new Set(estado.mensual.map((f) => +f.anio))];
-  const [selDesde, selHasta] = ["anio-desde", "anio-hasta"].map((id) => document.getElementById(id));
-  for (const sel of [selDesde, selHasta]) sel.replaceChildren(...anios.map((a) => el("option", { value: a }, String(a))));
-  estado.anios = { desde: anios[0], hasta: anios[anios.length - 1] };
-  selDesde.value = estado.anios.desde; selHasta.value = estado.anios.hasta;
-  selDesde.addEventListener("change", () => { estado.anios.desde = +selDesde.value; renderMensual(); });
-  selHasta.addEventListener("change", () => { estado.anios.hasta = +selHasta.value; renderMensual(); });
+  // Serie mensual: período por mes y año, acotado a los meses publicados.
+  const claves = estado.mensual.map(claveMes);
+  const [primerMes, ultimoMes] = [claves[0], claves[claves.length - 1]];
+  const sel = Object.fromEntries(["mes-desde", "anio-desde", "mes-hasta", "anio-hasta"].map((id) => [id, document.getElementById(id)]));
+  for (const id of ["mes-desde", "mes-hasta"]) {
+    sel[id].replaceChildren(...MESES_LARGOS.map((m, i) => el("option", { value: String(i + 1).padStart(2, "0") }, m)));
+  }
+  for (const id of ["anio-desde", "anio-hasta"]) {
+    sel[id].replaceChildren(...[...new Set(estado.mensual.map((f) => f.anio))].map((a) => el("option", { value: a }, a)));
+  }
+  const mostrarPeriodo = () => {
+    for (const lado of ["desde", "hasta"]) {
+      const anio = estado.periodo[lado].slice(0, 4);
+      sel[`anio-${lado}`].value = anio;
+      sel[`mes-${lado}`].value = estado.periodo[lado].slice(5);
+      for (const o of sel[`mes-${lado}`].options) o.disabled = `${anio}-${o.value}` < primerMes || `${anio}-${o.value}` > ultimoMes;
+    }
+  };
+  const marcarPreset = (meses) => document.querySelectorAll("#presets-mensual button")
+    .forEach((b) => b.classList.toggle("activo", b.dataset.meses === meses));
+  const fijarPeriodo = (meses) => {
+    const desde = meses === "todo" ? primerMes : [restarMeses(ultimoMes, +meses - 1), primerMes].sort().pop();
+    estado.periodo = { desde, hasta: ultimoMes };
+    marcarPreset(meses);
+    mostrarPeriodo();
+  };
+  document.querySelectorAll("#presets-mensual button").forEach((b) => b.addEventListener("click", () => {
+    fijarPeriodo(b.dataset.meses); renderMensual();
+  }));
+  for (const s of Object.values(sel)) {
+    s.addEventListener("change", () => {
+      const acotar = (c) => (c < primerMes ? primerMes : c > ultimoMes ? ultimoMes : c);
+      let desde = acotar(`${sel["anio-desde"].value}-${sel["mes-desde"].value}`);
+      let hasta = acotar(`${sel["anio-hasta"].value}-${sel["mes-hasta"].value}`);
+      if (desde > hasta) [desde, hasta] = [hasta, desde];
+      estado.periodo = { desde, hasta };
+      marcarPreset(null);
+      mostrarPeriodo();
+      renderMensual();
+    });
+  }
+  if (claves.length) fijarPeriodo("todo");
 
   document.querySelectorAll(".ver-tabla").forEach((b) => b.addEventListener("click", () => {
     const id = b.dataset.grafico;
