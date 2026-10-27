@@ -19,6 +19,7 @@ publicado en GitHub Pages permite consultarla.
 | `data/diario_detalle.csv` | Producción por central hidroeléctrica (Coca Codo, Paute, Sopladora…) y por tipo térmico (MWh) | por central y día |
 | `data/mensual_tecnologia.csv` | Serie oficial de energía neta por tecnología desde enero de 2010 (GWh) | mensual |
 | `data/anual_produccion.csv` | Producción anual oficial (GWh) | anual |
+| `data/mensual_operativo.csv` | Acumulado de cada mes según la pestaña "Acumulada mensual": producción por fuente, **importación y exportación** (MWh) y demanda máxima; `hasta_dia` dice hasta qué día va el acumulado (desde octubre de 2026) | mensual |
 | `data/raw/AAAA/AAAA-MM-DD.html.gz` | Copia comprimida de la página de cada día, para poder reprocesar | 1 por día |
 
 La serie diaria empieza el **25 de octubre de 2026**, primer día capturado por el

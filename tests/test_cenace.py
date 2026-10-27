@@ -60,6 +60,36 @@ class TestExtraerDiario(unittest.TestCase):
         self.assertRegex(r["hora_demanda_max"], r"^\d\d:\d\d$")
 
 
+class TestExtraerMensual(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.mes = cenace.extraer_mensual(FIXTURE.read_text(encoding="utf-8"))
+
+    def test_periodo(self):
+        self.assertEqual((self.mes["anio"], self.mes["mes"], self.mes["hasta_dia"]), (2026, 10, 25))
+        self.assertEqual(self.mes["completo"], "no")
+
+    def test_intercambio_y_produccion(self):
+        self.assertAlmostEqual(float(self.mes["importacion_mwh"]), 3129.66, places=2)
+        self.assertAlmostEqual(float(self.mes["exportacion_mwh"]), 2072.4, places=1)
+        self.assertAlmostEqual(float(self.mes["produccion_total_mwh"]), 2414299, delta=1)
+
+    def test_demanda_maxima_del_mes(self):
+        self.assertEqual(self.mes["fecha_demanda_max"], "2026-10-06")
+        self.assertAlmostEqual(float(self.mes["demanda_max_mw"]), 5268.38, places=2)
+
+    def test_guardar_no_retrocede(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            datos = Path(tmp)
+            self.assertEqual(cenace.guardar_mes(self.mes, datos=datos), "nuevo")
+            self.assertEqual(cenace.guardar_mes(self.mes, datos=datos), "sin cambios")
+            avanzado = {**self.mes, "hasta_dia": 26, "importacion_mwh": "3200"}
+            self.assertEqual(cenace.guardar_mes(avanzado, datos=datos), "actualizado")
+            self.assertEqual(cenace.guardar_mes(self.mes, datos=datos), "sin cambios")  # día 25 < 26
+            _, filas = cenace._leer_csv(datos / "mensual_operativo.csv")
+            self.assertEqual([(f["hasta_dia"], f["importacion_mwh"]) for f in filas], [("26", "3200")])
+
+
 class TestGuardarDia(unittest.TestCase):
     def test_idempotente(self):
         html = FIXTURE.read_text(encoding="utf-8")

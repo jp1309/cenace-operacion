@@ -2,7 +2,7 @@
 "use strict";
 
 const estado = {
-  resumen: [], curva: [], detalle: [], mensual: [], anual: [], meta: null,
+  resumen: [], curva: [], detalle: [], mensual: [], anual: [], operativo: [], meta: null,
   rango: { desde: null, hasta: null }, dia: null, periodo: { desde: null, hasta: null },
   vista: "diario", tablas: {}, modoTabla: {},
 };
@@ -385,6 +385,49 @@ function renderMensual() {
     ],
     filas: [...anual].reverse(),
   });
+
+  renderIntercambio();
+}
+
+// Importación y exportación: acumulado de cada mes que el robot captura desde oct-2026.
+// No depende del filtro de período porque la serie oficial termina antes.
+function renderIntercambio() {
+  const ops = estado.operativo;
+  const parcial = (f) => f.completo !== "si";
+  const ult = ops[ops.length - 1];
+  let nota = "El robot todavía no ha capturado ningún mes.";
+  if (ult) {
+    const neto = num(ult.importacion_mwh) - num(ult.exportacion_mwh);
+    const mes = MESES_LARGOS[ult.mes - 1];
+    nota = `${mes[0].toUpperCase()}${mes.slice(1)} de ${ult.anio}` +
+      (parcial(ult) ? `, acumulado hasta el día ${ult.hasta_dia}` : "") +
+      `: importación ${fmt(num(ult.importacion_mwh))} MWh, exportación ${fmt(num(ult.exportacion_mwh))} MWh ` +
+      `(saldo ${neto >= 0 ? "importador" : "exportador"} de ${fmt(Math.abs(neto))} MWh). ` +
+      "Serie desde octubre de 2026; las barras claras son meses todavía en curso.";
+  }
+  document.getElementById("nota-intercambio").textContent = nota;
+
+  const serie = (nombre, clave, color) => ({
+    type: "bar", name: nombre, x: ops.map((f) => `${MESES[f.mes - 1]} ${f.anio}`), y: ops.map((f) => num(f[clave])),
+    marker: { color: css(color), opacity: ops.map((f) => (parcial(f) ? 0.55 : 1)), line: { color: css("--superficie"), width: 1.5 } },
+    customdata: ops.map((f) => (parcial(f) ? ` (hasta el día ${f.hasta_dia})` : "")),
+    hovertemplate: `${nombre}: %{y:,.0f} MWh%{customdata}<extra></extra>`,
+    text: ops.length <= 12 ? ops.map((f) => fmt(num(f[clave]))) : undefined,
+    textposition: "outside", cliponaxis: false, textfont: { color: css("--tinta-2") },
+  });
+  dibujar("g-intercambio", ops.length ? [
+    serie("Importación", "importacion_mwh", "--serie-import"),
+    serie("Exportación", "exportacion_mwh", "--serie-export"),
+  ] : [], layoutBase({ barmode: "group", margin: { l: 56, r: 12, t: 32, b: 40 }, xaxis: { ...layoutBase().xaxis, type: "category" } }), {
+    columnas: [
+      { clave: "anio", titulo: "Año" }, { clave: "mes", titulo: "Mes", fmt: (v) => MESES[v - 1] },
+      { clave: "hasta_dia", titulo: "Hasta el día", fmt: (v, f) => (parcial(f) ? v : `${v} (mes completo)`) },
+      { clave: "importacion_mwh", titulo: "Importación (MWh)", fmt: (v) => fmt(num(v)) },
+      { clave: "exportacion_mwh", titulo: "Exportación (MWh)", fmt: (v) => fmt(num(v)) },
+      { clave: "_neto", titulo: "Neto (MWh)", fmt: (_, f) => fmt(num(f.importacion_mwh) - num(f.exportacion_mwh)) },
+    ],
+    filas: [...ops].reverse(),
+  });
 }
 
 // ---------------------------------------------------------------- vista: datos
@@ -534,14 +577,16 @@ async function cargar() {
   } catch { /* sin almacenamiento */ }
 
   const texto = (ruta) => fetch(ruta, { cache: "no-cache" }).then((r) => (r.ok ? r.text() : ""));
-  const [resumen, curva, detalle, mensual, anual, meta] = await Promise.all([
+  const [resumen, curva, detalle, mensual, anual, operativo, meta] = await Promise.all([
     texto("data/diario_resumen.csv"), texto("data/diario_curva.csv"), texto("data/diario_detalle.csv"),
-    texto("data/mensual_tecnologia.csv"), texto("data/anual_produccion.csv"), texto("data/meta.json"),
+    texto("data/mensual_tecnologia.csv"), texto("data/anual_produccion.csv"), texto("data/mensual_operativo.csv"),
+    texto("data/meta.json"),
   ]);
   Object.assign(estado, {
     resumen: resumen ? parseCSV(resumen).sort((a, b) => a.fecha.localeCompare(b.fecha)) : [],
     curva: curva ? parseCSV(curva) : [], detalle: detalle ? parseCSV(detalle) : [],
     mensual: mensual ? parseCSV(mensual) : [], anual: anual ? parseCSV(anual) : [],
+    operativo: operativo ? parseCSV(operativo) : [],
     meta: meta ? JSON.parse(meta) : null,
   });
 

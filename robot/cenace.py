@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import calendar
 import csv
 import datetime as dt
 import gzip
@@ -83,6 +84,11 @@ SERIES_CURVA = {
     "DEMANDA NACIONAL": "demanda_nacional_mw",
 }
 GRUPOS_DETALLE = ["hidraulica", "termica_y_otras"]
+COMPONENTES_PRODUCCION = ["produccion_total", "hidraulica", "termica", "no_convencional", "importacion", "exportacion"]
+COLUMNAS_MENSUAL_OPERATIVO = [
+    "anio", "mes", "hasta_dia", "completo", *[f"{k}_mwh" for k in COMPONENTES_PRODUCCION],
+    "demanda_max_mw", "fecha_demanda_max", "capturado_utc",
+]
 
 
 class ErrorFormato(Exception):
@@ -158,10 +164,46 @@ def _graficos(segmento: str) -> list[list[dict]]:
     return graficos
 
 
+def _pestana(pagina: str, palabra: str) -> str:
+    """La pestaña cuyo título contiene `palabra` (en mayúsculas y sin tildes)."""
+    segmento = next((p for p in _pestanas(pagina) if palabra in _normalizar(re.sub(r"<[^>]+>", " ", p[:3000]))), None)
+    if segmento is None:
+        raise ErrorFormato(f"no se encontró la pestaña de información operativa {palabra.lower()}")
+    return segmento
+
+
+def _produccion(segmento: str, referencia: str) -> dict[str, float]:
+    """Producción total y componentes de una pestaña (en la unidad que muestra la página)."""
+    # Cajas de resumen (valores redondeados que muestra la página).
+    cajas = {}
+    for etiqueta, valor in re.findall(r'<div class="resumen-box [^"]*">\s*<div>([^<]+)</div>\s*<div>([^<]+)</div>', segmento):
+        clave = COMPONENTES.get(_normalizar(etiqueta))
+        if clave:
+            cajas[clave] = _numero(valor)
+    if "produccion_total" not in cajas:
+        raise ErrorFormato("no se encontró la caja de PRODUCCIÓN TOTAL")
+
+    # Componentes con decimales desde el gráfico de torta; si falta, las cajas.
+    componentes = {k: v for k, v in cajas.items() if k != "produccion_total"}
+    torta = next((g[0] for g in _graficos(segmento) if g and g[0].get("type") == "pie"), None)
+    if torta:
+        for etiqueta, valor in zip(torta.get("labels", []), _decodificar(torta.get("values", []))):
+            clave = COMPONENTES.get(_normalizar(etiqueta))
+            if clave:
+                componentes[clave] = float(valor)
+    total = cajas["produccion_total"]
+    suma = sum(componentes.get(k, 0.0) for k in ("hidraulica", "termica", "no_convencional", "importacion"))
+    if abs(suma - total) <= 1.0:
+        total = suma
+    else:
+        print(f"  aviso {referencia}: la suma de componentes ({suma:.1f}) no cuadra con el total ({total:.0f})", file=sys.stderr)
+    return {"produccion_total": total, **componentes}
+
+
 def _fecha_pestana(segmento: str) -> dt.date:
     m = re.search(r"(\d{1,2})\s+de\s+([a-záéíóúñ]+)\s+de\s+(\d{4})", segmento[:4000], re.I)
     if not m:
-        raise ErrorFormato("no se encontró la fecha de la pestaña diaria")
+        raise ErrorFormato("no se encontró una fecha con formato 'D de mes de AAAA'")
     mes = MESES.get(_normalizar(m.group(2)).lower())
     if not mes:
         raise ErrorFormato(f"mes desconocido: {m.group(2)}")
@@ -181,38 +223,13 @@ def extraer_diario(pagina: str, fuente: str = "cenace") -> dict:
 
     Devuelve {"fecha", "resumen": dict, "detalle": [dict], "curva": [dict]}.
     """
-    diaria = next((p for p in _pestanas(pagina) if "DIARIA" in _normalizar(re.sub(r"<[^>]+>", " ", p[:3000]))), None)
-    if diaria is None:
-        raise ErrorFormato("no se encontró la pestaña 'Información operativa diaria'")
+    diaria = _pestana(pagina, "DIARIA")
     fecha = _fecha_pestana(diaria)
-
-    # Cajas de resumen (valores redondeados que muestra la página).
-    cajas = {}
-    for etiqueta, valor in re.findall(r'<div class="resumen-box [^"]*">\s*<div>([^<]+)</div>\s*<div>([^<]+)</div>', diaria):
-        clave = COMPONENTES.get(_normalizar(etiqueta))
-        if clave:
-            cajas[clave] = _numero(valor)
-    if "produccion_total" not in cajas:
-        raise ErrorFormato("no se encontró la caja de PRODUCCIÓN TOTAL")
+    produccion = _produccion(diaria, str(fecha))
 
     graficos = _graficos(diaria)
-    torta = next((g[0] for g in graficos if g and g[0].get("type") == "pie"), None)
     barras = [g for g in graficos if g and all(t.get("type") == "bar" for t in g)]
     curva = next((g for g in graficos if g and any(t.get("stackgroup") or t.get("mode") == "lines" for t in g)), None)
-
-    # Componentes con decimales desde el gráfico de torta; si falta, las cajas.
-    componentes = {k: v for k, v in cajas.items() if k != "produccion_total"}
-    if torta:
-        for etiqueta, valor in zip(torta.get("labels", []), _decodificar(torta.get("values", []))):
-            clave = COMPONENTES.get(_normalizar(etiqueta))
-            if clave:
-                componentes[clave] = float(valor)
-    total = cajas["produccion_total"]
-    suma = sum(componentes.get(k, 0.0) for k in ("hidraulica", "termica", "no_convencional", "importacion"))
-    if abs(suma - total) <= 1.0:
-        total = suma
-    else:
-        print(f"  aviso {fecha}: la suma de componentes ({suma:.1f}) no cuadra con el total ({total:.0f})", file=sys.stderr)
 
     detalle = []
     for grupo, grafico in zip(GRUPOS_DETALLE, barras):
@@ -244,8 +261,7 @@ def extraer_diario(pagina: str, fuente: str = "cenace") -> dict:
 
     resumen = {
         "fecha": fecha.isoformat(),
-        "produccion_total_mwh": _fmt(total),
-        **{f"{k}_mwh": _fmt(componentes.get(k)) for k in ("hidraulica", "termica", "no_convencional", "importacion", "exportacion")},
+        **{f"{k}_mwh": _fmt(produccion.get(k)) for k in COMPONENTES_PRODUCCION},
         "fuente": fuente,
         "capturado_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
@@ -256,6 +272,41 @@ def extraer_diario(pagina: str, fuente: str = "cenace") -> dict:
         resumen.update(demanda_max_mw=_fmt(vmax), hora_demanda_max=hmax, demanda_min_mw=_fmt(vmin), hora_demanda_min=hmin)
 
     return {"fecha": fecha, "resumen": resumen, "detalle": detalle, "curva": filas_curva}
+
+
+def extraer_mensual(pagina: str) -> dict:
+    """Extrae la pestaña "Información operativa mensual" (mes en curso, acumulado).
+
+    Devuelve una fila con el mes, hasta qué día va el acumulado, la producción
+    por fuente, importación y exportación (MWh) y la demanda máxima del mes.
+    """
+    mensual = _pestana(pagina, "MENSUAL")
+    texto = _normalizar(re.sub(r"<[^>]+>", " ", mensual[:4000])).lower()
+    m = re.search(r"([a-z]+) de (\d{4})(?: \(hasta el dia (\d{1,2})\))?", texto)
+    if not m or m.group(1) not in MESES:
+        raise ErrorFormato("no se encontró el período de la pestaña mensual")
+    anio, mes = int(m.group(2)), MESES[m.group(1)]
+    dias_mes = calendar.monthrange(anio, mes)[1]
+    # Sin "(hasta el día N)" se asume el acumulado del mes completo.
+    hasta = int(m.group(3)) if m.group(3) else dias_mes
+    produccion = _produccion(mensual, f"{anio}-{mes:02d}")
+
+    fila = {
+        "anio": anio, "mes": mes, "hasta_dia": hasta, "completo": "si" if hasta >= dias_mes else "no",
+        **{f"{k}_mwh": _fmt(produccion.get(k)) for k in COMPONENTES_PRODUCCION},
+        "capturado_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    # La curva de la pestaña mensual es la del día de demanda máxima del mes.
+    nota = re.search(r"Demanda m.xima mensual:([^<]+)", mensual)
+    if nota:
+        fila["fecha_demanda_max"] = _fecha_pestana(nota.group(1)).isoformat()
+    curva = next((g for g in _graficos(mensual) if g and any(t.get("mode") == "lines" for t in g)), [])
+    demanda = next((t for t in curva if _normalizar(t.get("name", "")) == "DEMANDA NACIONAL"), None)
+    if demanda:
+        valores = [v for v in _decodificar(demanda.get("y", [])) if v is not None]
+        if valores:
+            fila["demanda_max_mw"] = _fmt(float(max(valores)))
+    return fila
 
 
 # --------------------------------------------------------------------------- almacenamiento
@@ -311,6 +362,22 @@ def guardar_dia(dia: dict, html: str | None = None, sobrescribir: bool = True, d
         with gzip.GzipFile(crudo, "wb", mtime=0) as f:
             f.write(html.encode("utf-8"))
     return "actualizado" if existe else "nuevo"
+
+
+def guardar_mes(fila: dict, datos: Path = DATOS) -> str:
+    """Inserta o actualiza el acumulado de un mes en mensual_operativo.csv."""
+    ruta = datos / "mensual_operativo.csv"
+    columnas, filas = _leer_csv(ruta)
+    nueva = {k: str(v) for k, v in fila.items()}
+    clave = (nueva["anio"], nueva["mes"])
+    previa = next((f for f in filas if (f["anio"], f["mes"]) == clave), None)
+    if previa and (int(previa["hasta_dia"]) > int(nueva["hasta_dia"]) or _comparable([previa]) == _comparable([nueva])):
+        return "sin cambios"  # tampoco se retrocede a un acumulado más corto
+    columnas = list(dict.fromkeys(COLUMNAS_MENSUAL_OPERATIVO + columnas + list(nueva)))
+    filas = [f for f in filas if (f["anio"], f["mes"]) != clave] + [nueva]
+    filas.sort(key=lambda f: (int(f["anio"]), int(f["mes"])))
+    _escribir_csv(ruta, columnas, filas)
+    return "actualizado" if previa else "nuevo"
 
 
 # --------------------------------------------------------------------------- serie mensual oficial
@@ -454,6 +521,16 @@ def main(argv: list[str] | None = None) -> int:
           f"demanda máx. {r.get('demanda_max_mw', '?')} MW a las {r.get('hora_demanda_max', '?')} | "
           f"{len(dia['detalle'])} centrales/grupos, {len(dia['curva'])} puntos de curva")
     cambios = estado != "sin cambios"
+
+    # El acumulado del mes es complementario: si falla se avisa en GitHub pero el día se guarda igual.
+    try:
+        mes = extraer_mensual(html)
+        estado_mes = guardar_mes(mes)
+        print(f"Mes {mes['anio']}-{mes['mes']:02d} (hasta el día {mes['hasta_dia']}): {estado_mes} | "
+              f"importación {mes['importacion_mwh']} MWh, exportación {mes['exportacion_mwh']} MWh")
+        cambios |= estado_mes != "sin cambios"
+    except ErrorFormato as e:
+        print(f"::warning::No se pudo leer la pestaña mensual de CENACE: {e}")
 
     if not args.sin_mensual and not args.archivo:
         try:
