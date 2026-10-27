@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Operación eléctrica Ecuador</title>
+  <meta name="description" content="Base diaria de producción y demanda eléctrica del Ecuador construida con la Información Operativa publicada por CENACE.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M9 1 3 9h4l-1 6 6-8H8z' fill='%232a78d6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-basic-dist-min@2.35.2/plotly-basic.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="encabezado">
+    <div>
+      <h1>Operación eléctrica del Ecuador</h1>
+      <p class="sub">Base diaria construida con la <a href="https://www.cenace.gob.ec/info-operativa/InformacionOperativa.htm" rel="noopener">Información Operativa de CENACE</a>. Datos preliminares del SCADA, sujetos a revisión.</p>
+    </div>
+    <div class="encabezado-meta">
+      <span id="meta-cobertura">Cargando…</span>
+      <button id="tema" class="boton-fantasma" type="button" aria-label="Cambiar tema claro/oscuro">◐</button>
+    </div>
+  </header>
+
+  <nav class="pestanas" role="tablist">
+    <button role="tab" class="activa" data-vista="diario" aria-selected="true">Serie diaria</button>
+    <button role="tab" data-vista="dia" aria-selected="false">Consulta por día</button>
+    <button role="tab" data-vista="mensual" aria-selected="false">Serie mensual oficial</button>
+    <button role="tab" data-vista="datos" aria-selected="false">Datos</button>
+  </nav>
+
+  <main>
+    <!-- Serie diaria -->
+    <section id="vista-diario" class="vista activa">
+      <div class="filtros">
+        <div class="presets" role="group" aria-label="Rango de fechas">
+          <button type="button" data-rango="30">30 días</button>
+          <button type="button" data-rango="90" class="activo">90 días</button>
+          <button type="button" data-rango="365">1 año</button>
+          <button type="button" data-rango="todo">Todo</button>
+        </div>
+        <label>Desde <input type="date" id="desde"></label>
+        <label>Hasta <input type="date" id="hasta"></label>
+      </div>
+      <div class="tiles" id="tiles-diario"></div>
+      <article class="tarjeta">
+        <header><h2>Producción diaria por fuente <span class="unidad">GWh</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-produccion">Ver tabla</button></header>
+        <div id="g-produccion" class="grafico"></div>
+      </article>
+      <article class="tarjeta">
+        <header><h2>Demanda máxima diaria <span class="unidad">MW</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-demanda">Ver tabla</button></header>
+        <div id="g-demanda" class="grafico grafico-bajo"></div>
+      </article>
+      <p class="nota" id="nota-cobertura"></p>
+    </section>
+
+    <!-- Consulta por día -->
+    <section id="vista-dia" class="vista">
+      <div class="filtros">
+        <button type="button" id="dia-anterior" class="boton-fantasma" aria-label="Día anterior">‹</button>
+        <label>Día <select id="dia"></select></label>
+        <button type="button" id="dia-siguiente" class="boton-fantasma" aria-label="Día siguiente">›</button>
+        <a id="descarga-dia" class="enlace-descarga" download>Descargar curva del día (CSV)</a>
+      </div>
+      <div class="tiles" id="tiles-dia"></div>
+      <article class="tarjeta">
+        <header><h2>Curva de generación y demanda <span class="unidad">MW, cada 30 min</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-curva">Ver tabla</button></header>
+        <div id="g-curva" class="grafico"></div>
+      </article>
+      <div class="dos-columnas">
+        <article class="tarjeta">
+          <header><h2>Centrales hidroeléctricas <span class="unidad">MWh</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-hidro">Ver tabla</button></header>
+          <div id="g-hidro" class="grafico grafico-bajo"></div>
+        </article>
+        <article class="tarjeta">
+          <header><h2>Térmica y otras <span class="unidad">MWh</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-otras">Ver tabla</button></header>
+          <div id="g-otras" class="grafico grafico-bajo"></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Serie mensual -->
+    <section id="vista-mensual" class="vista">
+      <div class="filtros">
+        <label>Desde <select id="anio-desde"></select></label>
+        <label>Hasta <select id="anio-hasta"></select></label>
+      </div>
+      <div class="tiles" id="tiles-mensual"></div>
+      <article class="tarjeta">
+        <header><h2>Producción neta mensual por tecnología <span class="unidad">GWh</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-mensual">Ver tabla</button></header>
+        <div id="g-mensual" class="grafico"></div>
+      </article>
+      <article class="tarjeta">
+        <header><h2>Producción anual <span class="unidad">GWh</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-anual">Ver tabla</button></header>
+        <div id="g-anual" class="grafico grafico-bajo"></div>
+      </article>
+      <p class="nota">Fuente: indicadores de <a href="https://www.cenace.gob.ec/energia-neta-producida-por-las-centrales-de-generacion-gwh/" rel="noopener">energía neta producida</a> de CENACE. "No convencional" agrupa biogás, biomasa, eólica y fotovoltaica. El año en curso está incompleto.</p>
+    </section>
+
+    <!-- Datos -->
+    <section id="vista-datos" class="vista">
+      <article class="tarjeta">
+        <header><h2>Archivos de la base</h2></header>
+        <ul class="archivos">
+          <li><a href="data/diario_resumen.csv" download>diario_resumen.csv</a> — un registro por día: producción por fuente (MWh), demanda máxima y mínima (MW).</li>
+          <li><a href="data/diario_curva.csv" download>diario_curva.csv</a> — curva de generación y demanda cada 30 minutos (MW).</li>
+          <li><a href="data/diario_detalle.csv" download>diario_detalle.csv</a> — producción por central hidroeléctrica y por tipo térmico (MWh).</li>
+          <li><a href="data/mensual_tecnologia.csv" download>mensual_tecnologia.csv</a> — serie oficial mensual por tecnología desde 2010 (GWh).</li>
+          <li><a href="data/anual_produccion.csv" download>anual_produccion.csv</a> — producción anual oficial (GWh).</li>
+        </ul>
+        <p class="nota">Columna <code>fuente</code>: <code>cenace</code> = descargado directamente por el robot; <code>wayback:AAAAMMDDhhmmss</code> = recuperado de una copia de Internet Archive.</p>
+      </article>
+      <article class="tarjeta">
+        <header><h2>Resumen diario</h2></header>
+        <div id="tabla-resumen" class="tabla-contenedor"></div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="pie">
+    <span>Robot de descarga automática · <a id="enlace-repo" href="#" rel="noopener">código y datos en GitHub</a></span>
+    <span id="meta-actualizado"></span>
+  </footer>
+</body>
+</html>
