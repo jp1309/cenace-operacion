@@ -205,9 +205,11 @@ function renderDiario() {
   });
 
   const huecos = completa.filter((f) => f._vacio).length;
-  document.getElementById("nota-cobertura").textContent = huecos
-    ? `El rango tiene ${huecos} días sin datos: antes del ${fechaLarga(estado.meta?.inicio_robot || "2026-10-25")} solo hay días sueltos recuperados de Internet Archive.`
-    : "";
+  const primero = estado.resumen[0]?.fecha;
+  document.getElementById("nota-cobertura").textContent = [
+    primero ? `La serie diaria empieza el ${fechaLarga(primero)} y suma un día nuevo cada día.` : "",
+    huecos ? `El rango tiene ${huecos} días sin datos.` : "",
+  ].join(" ").trim();
 }
 
 // ---------------------------------------------------------------- vista: consulta por día
@@ -224,7 +226,7 @@ function renderDia() {
     tile("Demanda máxima", fmt(num(r.demanda_max_mw)), "MW", r.hora_demanda_max ? `a las ${r.hora_demanda_max}` : ""),
     tile("Demanda mínima", fmt(num(r.demanda_min_mw)), "MW", r.hora_demanda_min ? `a las ${r.hora_demanda_min}` : ""),
     tile("Intercambio neto", fmt(num(r.importacion_mwh) - num(r.exportacion_mwh)), "MWh",
-      `import. ${fmt(num(r.importacion_mwh))} · export. ${fmt(num(r.exportacion_mwh))} · fuente: ${r.fuente.startsWith("wayback") ? "Internet Archive" : "CENACE"}`),
+      `import. ${fmt(num(r.importacion_mwh))} · export. ${fmt(num(r.exportacion_mwh))}`),
   );
 
   const curva = estado.curva.filter((f) => f.fecha === fecha);
@@ -361,7 +363,6 @@ function renderDatos() {
       { clave: "importacion_mwh", titulo: "Import.", fmt: (v) => fmt(num(v)) },
       { clave: "exportacion_mwh", titulo: "Export.", fmt: (v) => fmt(num(v)) },
       { clave: "demanda_max_mw", titulo: "Dem. máx. (MW)", fmt: (v) => fmt(num(v)) },
-      { clave: "fuente", titulo: "Fuente", fmt: (v) => (v.startsWith("wayback") ? "Internet Archive" : "CENACE") },
     ],
     filas: [...estado.resumen].reverse(),
   }).firstChild);
@@ -471,8 +472,6 @@ async function cargar() {
     meta: meta ? JSON.parse(meta) : null,
   });
 
-  const directos = estado.resumen.filter((f) => !f.fuente.startsWith("wayback")).map((f) => f.fecha);
-  if (estado.meta) estado.meta.inicio_robot = directos[0];
   const ult = estado.resumen[estado.resumen.length - 1];
   document.getElementById("meta-cobertura").textContent = ult
     ? `${estado.resumen.length} días · último: ${fechaLarga(ult.fecha)}` : "Sin datos diarios todavía";

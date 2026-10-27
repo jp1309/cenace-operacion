@@ -71,12 +71,12 @@ class TestGuardarDia(unittest.TestCase):
             _, filas = cenace._leer_csv(datos / "diario_curva.csv")
             self.assertEqual(len(filas), 48)
 
-    def test_historico_no_pisa_datos_directos(self):
+    def test_sin_sobrescribir_respeta_lo_existente(self):
         html = FIXTURE.read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as tmp:
             datos = Path(tmp)
             cenace.guardar_dia(cenace.extraer_diario(html, fuente="cenace"), datos=datos)
-            estado = cenace.guardar_dia(cenace.extraer_diario(html, fuente="wayback:x"), sobrescribir=False, datos=datos)
+            estado = cenace.guardar_dia(cenace.extraer_diario(html, fuente="otra"), sobrescribir=False, datos=datos)
             self.assertEqual(estado, "sin cambios")
             _, filas = cenace._leer_csv(datos / "diario_resumen.csv")
             self.assertEqual(filas[0]["fuente"], "cenace")

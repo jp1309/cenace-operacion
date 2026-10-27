@@ -21,9 +21,8 @@ publicado en GitHub Pages permite consultarla.
 | `data/anual_produccion.csv` | Producción anual oficial (GWh) | anual |
 | `data/raw/AAAA/AAAA-MM-DD.html.gz` | Copia comprimida de la página de cada día, para poder reprocesar | 1 por día |
 
-Columna `fuente`: `cenace` si lo descargó el robot, `wayback:AAAAMMDDhhmmss` si se
-recuperó de una copia de Internet Archive (días sueltos de nov-2025 a oct-2026,
-anteriores al inicio del robot).
+La serie diaria empieza el **25 de octubre de 2026**, primer día capturado por el
+robot, y suma un día nuevo cada día.
 
 Los datos diarios son **preliminares del SCADA, sujetos a revisión** por CENACE.
 Si CENACE corrige un día que todavía muestra la página, el robot guarda la versión nueva.
@@ -31,7 +30,6 @@ Si CENACE corrige un día que todavía muestra la página, el robot guarda la ve
 ## Cómo funciona
 
 - `robot/cenace.py` — descarga, extrae y guarda (solo biblioteca estándar de Python 3.10+).
-- `robot/historico_wayback.py` — recupera días anteriores desde Internet Archive (se corrió una vez).
 - `.github/workflows/robot.yml` — corre el robot a las 06:17, 12:17 y 18:17 (hora de Ecuador),
   hace commit de los datos nuevos y vuelve a publicar el dashboard (`site/`).
 - `tests/` — pruebas del parser con una captura real de la página.
