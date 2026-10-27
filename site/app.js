@@ -42,6 +42,7 @@ const num = (v) => (v === "" || v == null ? null : Number(v));
 const fmt = (v, dec = 0) => (v == null || Number.isNaN(v) ? "—" :
   new Intl.NumberFormat("es-EC", { minimumFractionDigits: dec, maximumFractionDigits: dec }).format(v));
 const pct = (a, b) => (b ? fmt((100 * a) / b, 1) + " %" : "—");
+const dias = (n) => `${n} ${n === 1 ? "día" : "días"}`;
 const aFecha = (iso) => new Date(iso + "T00:00:00Z");
 const isoDe = (d) => d.toISOString().slice(0, 10);
 const fechaLarga = (iso) => new Intl.DateTimeFormat("es-EC", {
@@ -158,7 +159,7 @@ function renderDiario() {
   const pico = filas.reduce((m, f) => (num(f.demanda_max_mw) > (m ? num(m.demanda_max_mw) : -1) ? f : m), null);
   const neto = suma("importacion_mwh") - suma("exportacion_mwh");
   document.getElementById("tiles-diario").replaceChildren(
-    tile("Producción total", fmt(total / 1000, 1), "GWh", `${filas.length} días con datos`),
+    tile("Producción total", fmt(total / 1000, 1), "GWh", `${dias(filas.length)} con datos`),
     tile("Hidráulica", pct(suma("hidraulica_mwh"), total), "", `${fmt(suma("hidraulica_mwh") / 1000, 1)} GWh`),
     tile("Térmica", pct(suma("termica_mwh"), total), "", `${fmt(suma("termica_mwh") / 1000, 1)} GWh`),
     tile("Demanda máxima", pico ? fmt(num(pico.demanda_max_mw)) : "—", "MW",
@@ -208,7 +209,7 @@ function renderDiario() {
   const primero = estado.resumen[0]?.fecha;
   document.getElementById("nota-cobertura").textContent = [
     primero ? `La serie diaria empieza el ${fechaLarga(primero)} y suma un día nuevo cada día.` : "",
-    huecos ? `El rango tiene ${huecos} días sin datos.` : "",
+    huecos ? `El rango tiene ${dias(huecos)} sin datos.` : "",
   ].join(" ").trim();
 }
 
@@ -474,7 +475,7 @@ async function cargar() {
 
   const ult = estado.resumen[estado.resumen.length - 1];
   document.getElementById("meta-cobertura").textContent = ult
-    ? `${estado.resumen.length} días · último: ${fechaLarga(ult.fecha)}` : "Sin datos diarios todavía";
+    ? `${dias(estado.resumen.length)} · último: ${fechaLarga(ult.fecha)}` : "Sin datos diarios todavía";
   if (estado.meta?.actualizado_utc) {
     document.getElementById("meta-actualizado").textContent = "Base actualizada: " +
       new Intl.DateTimeFormat("es-EC", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Guayaquil" })
