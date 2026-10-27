@@ -67,6 +67,10 @@ jobs:
           mkdir -p _site/data
           cp site/* _site/
           cp data/*.csv data/meta.json _site/data/
+          # Versiona JS y CSS para que el navegador no mezcle archivos de distintos despliegues.
+          v="${GITHUB_SHA::7}"
+          sed -i "s/\"app\.js\"/\"app.js?v=${v}\"/; s/\"styles\.css\"/\"styles.css?v=${v}\"/" _site/index.html
+          grep -o -E '(app\.js|styles\.css)\?v=[0-9a-f]+' _site/index.html
 
       - uses: actions/configure-pages@v6
 

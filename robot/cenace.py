@@ -426,7 +426,7 @@ def actualizar_meta(datos: Path = DATOS) -> None:
             "hasta": f"{mensual[-1]['anio']}-{int(mensual[-1]['mes']):02d}" if mensual else None,
         },
     }
-    (datos / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (datos / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 # --------------------------------------------------------------------------- principal
