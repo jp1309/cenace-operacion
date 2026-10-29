@@ -26,6 +26,7 @@
     <button role="tab" class="activa" data-vista="diario" aria-selected="true">Serie diaria</button>
     <button role="tab" data-vista="dia" aria-selected="false">Consulta por día</button>
     <button role="tab" data-vista="mensual" aria-selected="false">Serie mensual oficial</button>
+    <button role="tab" data-vista="alerta" aria-selected="false">Alerta temprana</button>
     <button role="tab" data-vista="datos" aria-selected="false">Datos</button>
   </nav>
 
@@ -114,6 +115,44 @@
       <p class="nota">Producción: indicadores de <a href="https://www.cenace.gob.ec/energia-neta-producida-por-las-centrales-de-generacion-gwh/" rel="noopener">energía neta producida</a> de CENACE; "No convencional" agrupa biogás, biomasa, eólica y fotovoltaica. Esa serie oficial no incluye intercambios internacionales: la importación y exportación vienen de la pestaña <em>Acumulada mensual</em> de la <a href="https://www.cenace.gob.ec/info-operativa/InformacionOperativa.htm" rel="noopener">Información Operativa</a>, que el robot captura cada día desde octubre de 2026.</p>
     </section>
 
+    <!-- Alerta temprana -->
+    <section id="vista-alerta" class="vista">
+      <div class="estado-general" id="estado-general"></div>
+      <div class="tiles" id="tiles-alerta"></div>
+      <article class="tarjeta">
+        <header><h2>Cota del embalse de Mazar <span class="unidad">msnm, por día del año</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-cota">Ver tabla</button></header>
+        <p class="nota pista">Mazar regula el agua de Mazar, Paute-Molino y Sopladora. Las líneas de color son los años de crisis; en gris, los demás años.</p>
+        <div id="g-cota" class="grafico"></div>
+      </article>
+      <div class="dos-columnas">
+        <article class="tarjeta">
+          <header><h2>Caudal de entrada a Mazar <span class="unidad">m³/s, media de 7 días, escala log.</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-caudal">Ver tabla</button></header>
+          <div id="g-caudal" class="grafico grafico-bajo"></div>
+        </article>
+        <article class="tarjeta">
+          <header><h2>Caudal del río Coca <span class="unidad">m³/s, media de 7 días</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-coca">Ver tabla</button></header>
+          <div id="g-coca" class="grafico grafico-bajo"></div>
+        </article>
+      </div>
+      <article class="tarjeta">
+        <header><h2>Participación térmica en la producción <span class="unidad">% mensual</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-termica">Ver tabla</button></header>
+        <div id="g-termica" class="grafico grafico-bajo"></div>
+      </article>
+      <details class="tarjeta metodologia">
+        <summary>Cómo se calculan las alertas</summary>
+        <p>Cada indicador compara el dato más reciente con <strong>la misma fecha de años anteriores</strong>, porque el agua y la térmica tienen estaciones marcadas. Años de referencia: <strong>2023 y 2024</strong> (racionamientos y apagones) y, como años normales, 2020, 2021, 2022 y 2025.</p>
+        <ul>
+          <li><strong>Normal:</strong> el dato está dentro de lo observado en años normales, o no es claramente peor que todos ellos. Para eso hay una holgura de 1 m en la cota, 10 % en los caudales y 1 punto en la participación térmica. Con Mazar a menos de 5 m de su máximo histórico tampoco hay alarma.</li>
+          <li><strong>Vigilancia:</strong> es claramente peor que todos los años normales, pero mejor que los de crisis.</li>
+          <li><strong>Alerta:</strong> es claramente peor que los años normales e igual o peor que al menos uno de los años de crisis en esa fecha.</li>
+          <li><strong>Tendencia de Mazar:</strong> con la variación de la cota en los últimos 14 días se estima cuántos días faltan para llegar al mínimo de abril de 2024. Alerta si son menos de 30 días; vigilancia si son menos de 90.</li>
+          <li><strong>Estado general:</strong> alerta si el nivel de Mazar está en alerta o si hay dos o más indicadores en alerta; vigilancia si hay algún indicador en alerta o dos o más en vigilancia.</li>
+        </ul>
+        <p><strong>Prueba con datos históricos:</strong> aplicadas a cada día del pasado, con los años anteriores como referencia, las reglas del nivel de Mazar habrían marcado alerta en 114 de los 122 días de septiembre a diciembre de 2024 (apagones) y en la mayoría de los días de la crisis de abril de 2024. En 2025, un año normal, solo marcaron alerta 9 de 365 días.</p>
+        <p>Es un semáforo indicativo, no una evaluación oficial. Mira solo Mazar y el río Coca (no todos los embalses), usa la altura del embalse y no su volumen, y una participación térmica alta también puede ser una decisión deliberada para ahorrar agua. Hidrología: API de CELEC, vía el repositorio <a href="https://github.com/jp1309/celec" rel="noopener">jp1309/celec</a>; el caudal del río Coca suele publicarse con unos días de atraso. Térmica: serie mensual oficial y acumulado del mes de CENACE.</p>
+      </details>
+    </section>
+
     <!-- Datos -->
     <section id="vista-datos" class="vista">
       <article class="tarjeta">
@@ -124,6 +163,7 @@
           <li><a href="data/diario_detalle.csv" download>diario_detalle.csv</a> — producción por central hidroeléctrica y por tipo térmico (MWh).</li>
           <li><a href="data/mensual_tecnologia.csv" download>mensual_tecnologia.csv</a> — serie oficial mensual por tecnología desde 2010 (GWh).</li>
           <li><a href="data/anual_produccion.csv" download>anual_produccion.csv</a> — producción anual oficial (GWh).</li>
+          <li><a href="data/hidrologia.csv" download>hidrologia.csv</a> — cota (msnm) y caudal de entrada (m³/s) del embalse de Mazar desde 2020 y caudal del río Coca desde 2024, tomados de CELEC.</li>
           <li><a href="data/mensual_operativo.csv" download>mensual_operativo.csv</a> — acumulado de cada mes desde octubre de 2026: producción por fuente, importación y exportación (MWh) y demanda máxima; <code>hasta_dia</code> indica hasta qué día va el acumulado.</li>
         </ul>
         <p class="nota">La serie diaria empieza el 25 de octubre de 2026 y el robot agrega un día cada día. La columna <code>capturado_utc</code> indica cuándo se descargó cada día.</p>

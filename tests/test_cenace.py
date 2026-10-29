@@ -90,6 +90,32 @@ class TestExtraerMensual(unittest.TestCase):
             self.assertEqual([(f["hasta_dia"], f["importacion_mwh"]) for f in filas], [("26", "3200")])
 
 
+class TestHidrologia(unittest.TestCase):
+    HIDRO = (
+        "date,year,doy365,mmdd,series,metric,value,is_placeholder\n"
+        "2026-10-27,2026,300,27-oct,Mazar,Cota (msnm),2123.37,0\n"
+        "2026-10-27,2026,300,27-oct,Mazar,Caudal (m³/s),27.5,0\n"
+        "2026-10-27,2026,300,27-oct,Molino,Cota (msnm),1980.1,0\n"
+        "2020-08-31,2020,244,31-ago,Mazar,Cota (msnm),0.0,0\n"
+        "2026-10-30,2026,303,30-oct,Mazar,Cota (msnm),2122.0,1\n"
+    ).encode("utf-8")
+    COCA = "date,coca,css,frente,balance,status\n2026-10-20,151.33,131.62,19.72,0.01,ok\n2026-10-27,,,,,\n".encode("utf-8")
+
+    def test_extrae_mazar_y_coca(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            datos = Path(tmp)
+            self.assertTrue(cenace.actualizar_hidrologia(self.HIDRO, self.COCA, datos=datos))
+            self.assertFalse(cenace.actualizar_hidrologia(self.HIDRO, self.COCA, datos=datos))
+            _, filas = cenace._leer_csv(datos / "hidrologia.csv")
+            por_fecha = {f["fecha"]: f for f in filas}
+            # Ceros y placeholders no se guardan; Molino no es parte de la serie.
+            self.assertEqual(sorted(por_fecha), ["2026-10-20", "2026-10-27"])
+            self.assertEqual(por_fecha["2026-10-27"]["mazar_cota_msnm"], "2123.37")
+            self.assertEqual(por_fecha["2026-10-27"]["mazar_caudal_m3s"], "27.5")
+            self.assertEqual(por_fecha["2026-10-27"]["coca_caudal_m3s"], "")
+            self.assertEqual(por_fecha["2026-10-20"]["coca_caudal_m3s"], "151.33")
+
+
 class TestGuardarDia(unittest.TestCase):
     def test_idempotente(self):
         html = FIXTURE.read_text(encoding="utf-8")

@@ -2,7 +2,7 @@
 "use strict";
 
 const estado = {
-  resumen: [], curva: [], detalle: [], mensual: [], anual: [], operativo: [], meta: null,
+  resumen: [], curva: [], detalle: [], mensual: [], anual: [], operativo: [], hidro: [], meta: null,
   rango: { desde: null, hasta: null }, dia: null, periodo: { desde: null, hasta: null },
   drill: { fuente: "", central: "" },
   vista: "diario", tablas: {}, modoTabla: {},
@@ -582,6 +582,257 @@ function renderIntercambio() {
   });
 }
 
+// ---------------------------------------------------------------- vista: alerta temprana
+
+// Años de racionamientos y apagones; los demás años anteriores al actual son la referencia normal.
+const ANIOS_CRISIS = ["2023", "2024"];
+const ESTADOS = {
+  normal: { texto: "Normal", icono: "✓" },
+  vigilancia: { texto: "Vigilancia", icono: "!" },
+  alerta: { texto: "Alerta", icono: "✕" },
+};
+
+const sumarDias = (iso, n) => { const d = aFecha(iso); d.setUTCDate(d.getUTCDate() + n); return isoDe(d); };
+const esBisiesto = (a) => (a % 4 === 0 && a % 100 !== 0) || a % 400 === 0;
+// El mismo día y mes en otro año (el 29 de febrero cae al 28 en años no bisiestos).
+const mismaFecha = (iso, anio) => `${anio}-${iso.slice(5) === "02-29" && !esBisiesto(+anio) ? "02-28" : iso.slice(5)}`;
+const fechaCorta = (iso) => new Intl.DateTimeFormat("es-EC", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(aFecha(iso));
+
+function mediaVentana(porFecha, fin, dias, col) {
+  const valores = [];
+  for (let i = 0; i < dias; i++) {
+    const v = num(porFecha.get(sumarDias(fin, -i))?.[col]);
+    if (v != null) valores.push(v);
+  }
+  return valores.length >= dias / 2 ? valores.reduce((a, b) => a + b, 0) / valores.length : null;
+}
+
+// Compara un valor con la misma fecha en años de crisis y normales. Solo hay vigilancia o alerta si
+// el valor es claramente peor que todos los años normales (más allá de la holgura); es alerta si
+// además es igual o peor que algún año de crisis. `seguro` es un valor que nunca alarma (embalse casi lleno).
+function clasificar(valor, refs, { mayorEsMejor = true, holgura = 0, relativa = false, seguro = null } = {}) {
+  const crisis = refs.filter((r) => ANIOS_CRISIS.includes(r.anio) && r.valor != null).map((r) => r.valor);
+  const normales = refs.filter((r) => !ANIOS_CRISIS.includes(r.anio) && r.valor != null).map((r) => r.valor);
+  if (valor == null || !crisis.length || !normales.length) return null;
+  if (seguro != null && (mayorEsMejor ? valor >= seguro : valor <= seguro)) return "normal";
+  const s = mayorEsMejor ? 1 : -1; // se evalúa como "más alto es mejor"
+  const peorNormal = mayorEsMejor ? Math.min(...normales) : Math.max(...normales);
+  const umbral = peorNormal - s * (relativa ? Math.abs(peorNormal) * holgura : holgura);
+  if (s * valor >= s * umbral) return "normal";
+  const mejorCrisis = mayorEsMejor ? Math.max(...crisis) : Math.min(...crisis);
+  return s * valor <= s * mejorCrisis ? "alerta" : "vigilancia";
+}
+// Calibración (ver la metodología en la página): cota con 1 m de holgura y sin alarma a menos de 5 m
+// del máximo histórico; caudales con 10 % de holgura; térmica con 1 punto porcentual.
+const REGLA_COTA = { holgura: 1 };
+const REGLA_CAUDAL = { holgura: 0.1, relativa: true };
+const REGLA_TERMICA = { mayorEsMejor: false, holgura: 0.01 };
+
+const promedio = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const difTexto = (d, ref, unidad, dec = 1) => `${fmt(Math.abs(d), dec)} ${unidad} ${d >= 0 ? "sobre" : "bajo"} ${ref}`;
+
+function tileEstado(ind) {
+  const e = ESTADOS[ind.estado];
+  const nodo = tile(ind.titulo, ind.valor, ind.unidad, ind.detalle);
+  nodo.classList.add("estado");
+  if (e) {
+    nodo.classList.add(ind.estado);
+    nodo.append(el("div", { class: "estado-etiqueta" },
+      el("span", { class: `insignia ${ind.estado}`, "aria-hidden": "true" }, e.icono), e.texto));
+  } else {
+    nodo.append(el("div", { class: "estado-etiqueta" }, "Sin datos suficientes"));
+  }
+  nodo.append(el("div", { class: "detalle" }, ind.fecha ? `Dato al ${fechaCorta(ind.fecha)}` : ""));
+  return nodo;
+}
+
+function indicadoresAlerta() {
+  const hidro = estado.hidro;
+  const porFecha = new Map(hidro.map((f) => [f.fecha, f]));
+  const ultimaCon = (col) => [...hidro].reverse().find((f) => num(f[col]) != null)?.fecha;
+  const anios = [...new Set(hidro.map((f) => f.fecha.slice(0, 4)))];
+  const refsDe = (fecha, valorEn) => anios.filter((a) => a < fecha.slice(0, 4))
+    .map((a) => ({ anio: a, valor: valorEn(mismaFecha(fecha, a)) }));
+  const normalesDe = (refs) => promedio(refs.filter((r) => !ANIOS_CRISIS.includes(r.anio) && r.valor != null).map((r) => r.valor));
+  const de = (refs, anio) => refs.find((r) => r.anio === anio)?.valor;
+  const out = {};
+
+  // 1. Nivel de Mazar
+  const fC = ultimaCon("mazar_cota_msnm");
+  if (fC) {
+    const v = num(porFecha.get(fC).mazar_cota_msnm);
+    const refs = refsDe(fC, (d) => num(porFecha.get(d)?.mazar_cota_msnm));
+    const parecido = refs.filter((r) => r.valor != null).sort((a, b) => Math.abs(a.valor - v) - Math.abs(b.valor - v))[0];
+    const maxHistorico = Math.max(...hidro.map((f) => num(f.mazar_cota_msnm)).filter((x) => x != null));
+    out.cota = {
+      titulo: "Nivel de Mazar", valor: fmt(v, 1), unidad: "msnm", fecha: fC, parecido,
+      estado: clasificar(v, refs, { ...REGLA_COTA, seguro: maxHistorico - 5 }),
+      detalle: [de(refs, "2024") != null ? difTexto(v - de(refs, "2024"), "2024", "m") : "",
+        normalesDe(refs) != null ? difTexto(v - normalesDe(refs), "años normales", "m") : ""].filter(Boolean).join(" · "),
+    };
+
+    // 3. Tendencia: días hasta el mínimo de los años de crisis al ritmo de los últimos 14 días.
+    const minimo = hidro.filter((f) => ANIOS_CRISIS.includes(f.fecha.slice(0, 4)) && num(f.mazar_cota_msnm) != null)
+      .reduce((m, f) => (!m || num(f.mazar_cota_msnm) < num(m.mazar_cota_msnm) ? f : m), null);
+    const antes = num(porFecha.get(sumarDias(fC, -14))?.mazar_cota_msnm);
+    if (minimo && antes != null) {
+      const cotaMin = num(minimo.mazar_cota_msnm);
+      const delta = v - antes;
+      const ritmo = -delta / 14;
+      const diasRestantes = ritmo > 0 ? (v - cotaMin) / ritmo : null;
+      const est = v <= cotaMin ? "alerta" : diasRestantes == null ? "normal" : diasRestantes < 30 ? "alerta" : diasRestantes < 90 ? "vigilancia" : "normal";
+      out.tendencia = {
+        titulo: "Tendencia de Mazar (14 días)", valor: `${delta >= 0 ? "+" : "−"}${fmt(Math.abs(delta), 1)}`, unidad: "m", fecha: fC, estado: est,
+        minimo: { fecha: minimo.fecha, cota: cotaMin },
+        detalle: diasRestantes == null ? "El embalse está subiendo o estable."
+          : `A este ritmo llegaría al mínimo de ${fechaCorta(minimo.fecha)} (${fmt(cotaMin, 1)}) en unos ${fmt(diasRestantes)} días.`,
+      };
+    }
+  }
+
+  // 2 y 4. Caudales: media de 14 días frente a la misma ventana de otros años.
+  const caudal = (col, titulo) => {
+    const f = ultimaCon(col);
+    if (!f) return null;
+    const v = mediaVentana(porFecha, f, 14, col);
+    const refs = refsDe(f, (d) => mediaVentana(porFecha, d, 14, col));
+    return {
+      titulo, valor: fmt(v), unidad: "m³/s", fecha: f, estado: clasificar(v, refs, REGLA_CAUDAL),
+      detalle: [de(refs, "2024") != null ? `2024: ${fmt(de(refs, "2024"))}` : "",
+        normalesDe(refs) != null ? `años normales: ${fmt(normalesDe(refs))}` : ""].filter(Boolean).join(" · ") + " (media de 14 días)",
+    };
+  };
+  out.caudal = caudal("mazar_caudal_m3s", "Caudal de entrada a Mazar");
+  out.coca = caudal("coca_caudal_m3s", "Caudal del río Coca");
+
+  // 5. Dependencia térmica del mes en curso frente al mismo mes de otros años.
+  const op = estado.operativo[estado.operativo.length - 1];
+  if (op) {
+    const v = num(op.termica_mwh) / num(op.produccion_total_mwh);
+    const refs = anios.filter((a) => a < op.anio).map((a) => {
+      const m = estado.mensual.find((x) => x.anio === a && +x.mes === +op.mes);
+      return { anio: a, valor: m ? num(m.termica_gwh) / num(m.total_gwh) : null };
+    });
+    const normales = refs.filter((r) => !ANIOS_CRISIS.includes(r.anio) && r.valor != null).map((r) => r.valor);
+    out.termica = {
+      titulo: "Dependencia térmica", valor: fmt(100 * v, 1), unidad: "%",
+      fecha: `${op.anio}-${String(op.mes).padStart(2, "0")}-${String(op.hasta_dia).padStart(2, "0")}`,
+      estado: clasificar(v, refs, REGLA_TERMICA),
+      detalle: [...ANIOS_CRISIS.filter((a) => de(refs, a) != null).map((a) => `${MESES[op.mes - 1]} ${a}: ${fmt(100 * de(refs, a))} %`),
+        normales.length ? `años normales: ${fmt(100 * Math.min(...normales))}–${fmt(100 * Math.max(...normales))} %` : ""].filter(Boolean).join(" · "),
+    };
+  }
+  return out;
+}
+
+function renderAlerta() {
+  if (!estado.hidro.length) {
+    document.getElementById("estado-general").replaceChildren(el("p", {}, "No hay datos de hidrología todavía."));
+    return;
+  }
+  const ind = indicadoresAlerta();
+  const lista = [ind.cota, ind.tendencia, ind.caudal, ind.coca, ind.termica].filter(Boolean);
+  const cuenta = (e) => lista.filter((i) => i.estado === e).length;
+  const general = ind.cota?.estado === "alerta" || cuenta("alerta") >= 2 ? "alerta"
+    : cuenta("alerta") >= 1 || cuenta("vigilancia") >= 2 ? "vigilancia" : "normal";
+  const partes = [["alerta", "en alerta", "en alerta"], ["vigilancia", "en vigilancia", "en vigilancia"], ["normal", "normal", "normales"]]
+    .filter(([e]) => cuenta(e)).map(([e, uno, varios]) => `${cuenta(e)} ${cuenta(e) === 1 ? uno : varios}`);
+  const parecido = ind.cota?.parecido;
+  document.getElementById("estado-general").className = `estado-general ${general}`;
+  document.getElementById("estado-general").replaceChildren(
+    el("span", { class: `insignia ${general}`, "aria-hidden": "true" }, ESTADOS[general].icono),
+    el("div", {},
+      el("h2", {}, `Estado general: ${ESTADOS[general].texto}`),
+      el("p", {}, `De ${lista.length} indicadores: ${partes.join(", ")}.` +
+        (parecido ? ` En esta fecha, la cota de Mazar se parece más a la de ${parecido.anio} (${fmt(parecido.valor, 1)} msnm).` : ""))),
+  );
+  document.getElementById("tiles-alerta").replaceChildren(...lista.map(tileEstado));
+
+  // Gráficos por día del año: cada año es una línea; crisis en color, actual en tinta, el resto en gris.
+  const hidro = estado.hidro;
+  const porFecha = new Map(hidro.map((f) => [f.fecha, f]));
+  const actual = hidro[hidro.length - 1].fecha.slice(0, 4);
+  const estilo = (a) => (a === actual ? { color: css("--tinta"), width: 3, rango: 1 }
+    : a === "2024" ? { color: css("--cat-2"), width: 2, rango: 2 }
+    : a === "2023" ? { color: css("--cat-7"), width: 2, rango: 3 }
+    : { color: css("--otras"), width: 1.2, rango: 10 });
+  const ejeAnio = { ...layoutBase().xaxis, type: "date", tickformat: "%b", hoverformat: "%d %b", range: ["2000-01-01", "2000-12-31"], dtick: "M1" };
+  const porAnio = (col, valor) => [...new Set(hidro.filter((f) => num(f[col]) != null).map((f) => f.fecha.slice(0, 4)))]
+    .sort((a, b) => estilo(b).rango - estilo(a).rango)
+    .map((a) => {
+      const filas = hidro.filter((f) => f.fecha.startsWith(a) && num(f[col]) != null);
+      const s = estilo(a);
+      return {
+        type: "scatter", mode: "lines", name: a, legendrank: s.rango, x: filas.map((f) => `2000-${f.fecha.slice(5)}`),
+        y: filas.map(valor), line: { color: s.color, width: s.width }, connectgaps: false,
+      };
+    });
+  const tablaReciente = (cols) => {
+    const ultima = hidro[hidro.length - 1].fecha;
+    const filas = [];
+    for (let i = 0; i < 30; i++) filas.push(porFecha.get(sumarDias(ultima, -i)) || { fecha: sumarDias(ultima, -i) });
+    return { columnas: [{ clave: "fecha", titulo: "Fecha" }, ...cols], filas };
+  };
+
+  const cota = porAnio("mazar_cota_msnm", (f) => num(f.mazar_cota_msnm));
+  cota.forEach((t) => { t.hovertemplate = `${t.name}: %{y:,.1f} msnm<extra></extra>`; });
+  const minimo = ind.tendencia?.minimo;
+  dibujar("g-cota", cota, layoutBase({
+    xaxis: ejeAnio, yaxis: { ...layoutBase().yaxis, rangemode: "normal", tickformat: ",~r" },
+    shapes: minimo ? [{ type: "line", xref: "paper", x0: 0, x1: 1, y0: minimo.cota, y1: minimo.cota, line: { color: css("--tinta-2"), width: 1 } }] : [],
+    annotations: minimo ? [{ xref: "paper", x: 0.01, y: minimo.cota, yanchor: "bottom", xanchor: "left", showarrow: false,
+      text: `Mínimo de ${fechaCorta(minimo.fecha)}: ${fmt(minimo.cota, 1)}`, font: { color: css("--tinta-2"), size: 11 } }] : [],
+  }), tablaReciente([
+    { clave: "mazar_cota_msnm", titulo: `Cota ${actual} (msnm)`, fmt: (v) => fmt(num(v), 2) },
+    ...ANIOS_CRISIS.map((a) => ({ clave: `_${a}`, titulo: `Misma fecha ${a}`, fmt: (_, f) => fmt(num(porFecha.get(mismaFecha(f.fecha, a))?.mazar_cota_msnm), 2) })),
+  ]));
+
+  const media7 = (col) => (f) => mediaVentana(porFecha, f.fecha, 7, col);
+  const caudal = porAnio("mazar_caudal_m3s", media7("mazar_caudal_m3s"));
+  caudal.forEach((t) => { t.hovertemplate = `${t.name}: %{y:,.0f} m³/s<extra></extra>`; });
+  dibujar("g-caudal", caudal, layoutBase({
+    xaxis: ejeAnio, yaxis: { ...layoutBase().yaxis, type: "log", tickvals: [5, 10, 20, 50, 100, 200, 500], rangemode: "normal" },
+  }), tablaReciente([
+    { clave: "mazar_caudal_m3s", titulo: `Caudal ${actual} (m³/s)`, fmt: (v) => fmt(num(v), 1) },
+    ...ANIOS_CRISIS.map((a) => ({ clave: `_${a}`, titulo: `Misma fecha ${a}`, fmt: (_, f) => fmt(num(porFecha.get(mismaFecha(f.fecha, a))?.mazar_caudal_m3s), 1) })),
+  ]));
+
+  const coca = porAnio("coca_caudal_m3s", media7("coca_caudal_m3s"));
+  coca.forEach((t) => { t.hovertemplate = `${t.name}: %{y:,.0f} m³/s<extra></extra>`; });
+  dibujar("g-coca", coca, layoutBase({ xaxis: ejeAnio, yaxis: { ...layoutBase().yaxis, rangemode: "tozero" } }), tablaReciente([
+    { clave: "coca_caudal_m3s", titulo: `Río Coca ${actual} (m³/s)`, fmt: (v) => fmt(num(v), 1) },
+    { clave: "_2024", titulo: "Misma fecha 2024", fmt: (_, f) => fmt(num(porFecha.get(mismaFecha(f.fecha, "2024"))?.coca_caudal_m3s), 1) },
+  ]));
+
+  // Participación térmica mensual oficial + mes en curso; franja de la crisis 2023–2024.
+  const meses = estado.mensual.filter((m) => +m.anio >= 2019);
+  const op = estado.operativo[estado.operativo.length - 1];
+  const trazasTermica = [{
+    type: "scatter", mode: "lines", name: "Mensual oficial", x: meses.map((m) => `${claveMes(m)}-01`),
+    y: meses.map((m) => (100 * num(m.termica_gwh)) / num(m.total_gwh)), line: { color: css("--serie-termica"), width: 2 },
+    hovertemplate: "%{x|%b %Y}: %{y:,.1f} %<extra></extra>",
+  }];
+  if (op) {
+    trazasTermica.push({
+      type: "scatter", mode: "markers+text", name: "Mes en curso", x: [`${op.anio}-${String(op.mes).padStart(2, "0")}-01`],
+      y: [(100 * num(op.termica_mwh)) / num(op.produccion_total_mwh)],
+      marker: { size: 10, color: css("--tinta"), line: { color: css("--superficie"), width: 2 } },
+      text: [`${MESES[op.mes - 1]} ${op.anio} (al día ${op.hasta_dia})`], textposition: "top left", textfont: { color: css("--tinta-2"), size: 11 },
+      hovertemplate: `${MESES[op.mes - 1]} ${op.anio}, al día ${op.hasta_dia}: %{y:,.1f} %<extra></extra>`,
+    });
+  }
+  dibujar("g-termica", trazasTermica, layoutBase({
+    hovermode: "closest", xaxis: { ...layoutBase().xaxis, type: "date", tickformat: "%Y", dtick: "M12" },
+    yaxis: { ...layoutBase().yaxis, ticksuffix: " %" },
+    shapes: [{ type: "rect", xref: "x", yref: "paper", x0: "2023-09-15", x1: "2024-12-31", y0: 0, y1: 1, fillcolor: css("--otras"), opacity: 0.25, line: { width: 0 }, layer: "below" }],
+    annotations: [{ xref: "x", yref: "paper", x: "2024-05-01", y: 1, yanchor: "bottom", showarrow: false, text: "Crisis 2023–2024", font: { color: css("--tinta-2"), size: 11 } }],
+  }), {
+    columnas: [{ clave: "anio", titulo: "Año" }, { clave: "mes", titulo: "Mes", fmt: (v) => MESES[v - 1] },
+      { clave: "_t", titulo: "Térmica (%)", fmt: (_, m) => fmt((100 * num(m.termica_gwh)) / num(m.total_gwh), 1) }],
+    filas: [...meses].reverse(),
+  });
+}
+
 // ---------------------------------------------------------------- vista: datos
 
 function renderDatos() {
@@ -607,6 +858,7 @@ function render() {
   if (estado.vista === "diario") renderDiario();
   else if (estado.vista === "dia") renderDia();
   else if (estado.vista === "mensual") renderMensual();
+  else if (estado.vista === "alerta") renderAlerta();
   else renderDatos();
 }
 
@@ -736,16 +988,17 @@ async function cargar() {
   } catch { /* sin almacenamiento */ }
 
   const texto = (ruta) => fetch(ruta, { cache: "no-cache" }).then((r) => (r.ok ? r.text() : ""));
-  const [resumen, curva, detalle, mensual, anual, operativo, meta] = await Promise.all([
+  const [resumen, curva, detalle, mensual, anual, operativo, hidro, meta] = await Promise.all([
     texto("data/diario_resumen.csv"), texto("data/diario_curva.csv"), texto("data/diario_detalle.csv"),
     texto("data/mensual_tecnologia.csv"), texto("data/anual_produccion.csv"), texto("data/mensual_operativo.csv"),
-    texto("data/meta.json"),
+    texto("data/hidrologia.csv"), texto("data/meta.json"),
   ]);
   Object.assign(estado, {
     resumen: resumen ? parseCSV(resumen).sort((a, b) => a.fecha.localeCompare(b.fecha)) : [],
     curva: curva ? parseCSV(curva) : [], detalle: detalle ? parseCSV(detalle) : [],
     mensual: mensual ? parseCSV(mensual) : [], anual: anual ? parseCSV(anual) : [],
     operativo: operativo ? parseCSV(operativo) : [],
+    hidro: hidro ? parseCSV(hidro).sort((a, b) => a.fecha.localeCompare(b.fecha)) : [],
     meta: meta ? JSON.parse(meta) : null,
   });
 

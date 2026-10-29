@@ -17,6 +17,11 @@ día disponible; este repositorio lo guarda día a día.
 | `data/mensual_operativo.csv` | Acumulado de cada mes, incluida importación y exportación (MWh), desde oct-2026. `hasta_dia` indica hasta qué día va el acumulado. |
 | `data/mensual_tecnologia.csv` | Serie oficial de energía neta por tecnología desde enero de 2010 (GWh). |
 | `data/anual_produccion.csv` | Producción anual oficial (GWh). |
+| `data/hidrologia.csv` | Cota (msnm) y caudal de entrada (m³/s) del embalse de Mazar desde 2020, y caudal del río Coca desde 2024. Fuente: API de CELEC, vía [jp1309/celec](https://github.com/jp1309/celec). |
+
+El dashboard incluye una pestaña de **alerta temprana** que compara la hidrología de
+Mazar, el río Coca y la participación térmica con la misma fecha de años normales y de
+la crisis de 2023–2024. Es un semáforo indicativo, no oficial.
 
 Los datos diarios son preliminares del SCADA y CENACE puede revisarlos.
 

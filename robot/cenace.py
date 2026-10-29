@@ -23,6 +23,7 @@ import calendar
 import csv
 import datetime as dt
 import gzip
+import io
 import json
 import re
 import ssl
@@ -42,6 +43,7 @@ CERT_INTERMEDIO = RAIZ / "certs" / "sectigo-dv-r36.pem"
 
 URL_PAGINA = "https://www.cenace.gob.ec/info-operativa/InformacionOperativa.htm"
 URL_INDICADORES = "https://www.cenace.gob.ec/wp-content/plugins/ez-addons/data/indicadores.xlsx"
+URL_CELEC = "https://raw.githubusercontent.com/jp1309/celec/main/data/"
 USER_AGENT = "Mozilla/5.0 (compatible; cenace-operacion-robot/1.0)"
 
 MESES = {
@@ -85,6 +87,7 @@ SERIES_CURVA = {
 }
 GRUPOS_DETALLE = ["hidraulica", "termica_y_otras"]
 COMPONENTES_PRODUCCION = ["produccion_total", "hidraulica", "termica", "no_convencional", "importacion", "exportacion"]
+COLUMNAS_HIDROLOGIA = ["fecha", "mazar_cota_msnm", "mazar_caudal_m3s", "coca_caudal_m3s"]
 COLUMNAS_MENSUAL_OPERATIVO = [
     "anio", "mes", "hasta_dia", "completo", *[f"{k}_mwh" for k in COMPONENTES_PRODUCCION],
     "demanda_max_mw", "fecha_demanda_max", "capturado_utc",
@@ -477,6 +480,34 @@ def _escribir_si_cambia(ruta: Path, columnas: list[str], filas: list[dict]) -> b
     return True
 
 
+# --------------------------------------------------------------------------- hidrología (repo jp1309/celec)
+
+def actualizar_hidrologia(contenido_hidro: bytes, contenido_coca: bytes, datos: Path = DATOS) -> bool:
+    """Guarda en hidrologia.csv la cota y el caudal de Mazar y el caudal del río Coca.
+
+    Los datos vienen de los CSV que publica el repositorio jp1309/celec (API de CELEC).
+    Algunos valores en 0 de la fuente son datos faltantes y se dejan vacíos.
+    """
+    filas: dict[str, dict] = {}
+
+    def poner(fecha: str, columna: str, valor: str) -> None:
+        try:
+            numero = float(valor)
+        except (TypeError, ValueError):
+            return
+        if numero > 0:
+            filas.setdefault(fecha, {"fecha": fecha})[columna] = _fmt(numero)
+
+    columnas_celec = {("Mazar", "Cota (msnm)"): "mazar_cota_msnm", ("Mazar", "Caudal (m³/s)"): "mazar_caudal_m3s"}
+    for r in csv.DictReader(io.StringIO(contenido_hidro.decode("utf-8-sig"))):
+        columna = columnas_celec.get((r.get("series"), r.get("metric")))
+        if columna and r.get("is_placeholder", "0") in ("0", "", "False", "false"):
+            poner(r["date"], columna, r.get("value"))
+    for r in csv.DictReader(io.StringIO(contenido_coca.decode("utf-8-sig"))):
+        poner(r["date"], "coca_caudal_m3s", r.get("coca"))
+    return _escribir_si_cambia(datos / "hidrologia.csv", COLUMNAS_HIDROLOGIA, [filas[k] for k in sorted(filas)])
+
+
 # --------------------------------------------------------------------------- metadatos
 
 def actualizar_meta(datos: Path = DATOS) -> None:
@@ -541,6 +572,17 @@ def main(argv: list[str] | None = None) -> int:
                 print("Serie mensual oficial: sin cambios")
         except Exception as e:  # la serie mensual es complementaria; no detiene el robot
             print(f"  aviso: no se pudo actualizar la serie mensual ({e})", file=sys.stderr)
+
+        # Hidrología de CELEC (otro repositorio, sin el problema de certificado de CENACE).
+        try:
+            if actualizar_hidrologia(descargar(URL_CELEC + "hidrologia_diaria_larga.csv"),
+                                     descargar(URL_CELEC + "ccs_caudales_diarios.csv")):
+                print("Hidrología CELEC: actualizada")
+                cambios = True
+            else:
+                print("Hidrología CELEC: sin cambios")
+        except Exception as e:
+            print(f"::warning::No se pudo actualizar la hidrología de CELEC: {e}")
 
     if cambios:
         actualizar_meta()
