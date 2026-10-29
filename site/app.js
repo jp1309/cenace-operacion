@@ -4,6 +4,7 @@
 const estado = {
   resumen: [], curva: [], detalle: [], mensual: [], anual: [], operativo: [], meta: null,
   rango: { desde: null, hasta: null }, dia: null, periodo: { desde: null, hasta: null },
+  drill: { fuente: "", central: "" },
   vista: "diario", tablas: {}, modoTabla: {},
 };
 
@@ -13,6 +14,19 @@ const FUENTES = [
   { clave: "no_convencional", nombre: "No convencional", color: "--serie-noconv" },
   { clave: "importacion", nombre: "Importación", color: "--serie-import" },
 ];
+
+// Desglose de cada fuente según diario_detalle.csv, con un color fijo por central (en orden de
+// la paleta categórica) para que no cambie al filtrar. Las centrales que no estén aquí van en gris.
+const DESGLOSE = {
+  hidraulica: [
+    ["Coca Codo", "--cat-1"], ["Paute", "--cat-2"], ["Sopladora", "--cat-3"], ["Mazar", "--cat-4"],
+    ["San Francisco", "--cat-5"], ["Agoyán", "--cat-6"], ["Delsitanisagua", "--cat-7"], ["Minas San Francisco", "--cat-8"],
+  ],
+  termica: [["Térmica", "--cat-2"], ["Gas Natural", "--cat-3"]],
+  no_convencional: [["Renovable", "--cat-3"]],
+};
+// En el detalle de CENACE, "Renovable" es la producción no convencional; lo demás del grupo térmico es térmica.
+const fuenteDe = (d) => (d.grupo === "hidraulica" ? "hidraulica" : /renovable/i.test(d.nombre) ? "no_convencional" : "termica");
 
 // ---------------------------------------------------------------- utilidades
 
@@ -69,6 +83,9 @@ function tile(etiqueta, valor, unidad = "", detalle = "") {
     el("div", { class: "valor", html: `${valor}${unidad ? `<small>${unidad}</small>` : ""}` }),
     el("div", { class: "detalle" }, detalle));
 }
+
+// Eje de fechas diario: marcas de día completo (nunca horas), unas 10 como máximo.
+const ejeDias = (n) => ({ type: "date", tickformat: "%d %b", hoverformat: "%a %d %b %Y", dtick: 86400000 * Math.max(1, Math.ceil(n / 10)) });
 
 // Rellena días faltantes con null para que las líneas no unan fechas lejanas.
 function serieCompleta(filas, desde, hasta) {
@@ -151,43 +168,178 @@ function filasEnRango() {
   return estado.resumen.filter((f) => f.fecha >= desde && f.fecha <= hasta);
 }
 
+// Series del nivel elegido: todas las fuentes, las centrales de una fuente o una central.
+// Cada serie es { nombre, color, valores: Map(fecha -> MWh), destino: nivel al que baja al hacer clic }.
+function seriesDiarias(filas) {
+  const { fuente, central } = estado.drill;
+  const delResumen = (clave) => new Map(filas.map((f) => [f.fecha, num(f[`${clave}_mwh`])]));
+  if (!fuente) {
+    return FUENTES.map((s) => ({
+      nombre: s.nombre, color: s.color, valores: delResumen(s.clave), destino: DESGLOSE[s.clave] ? { fuente: s.clave, central: "" } : null,
+    }));
+  }
+  const info = FUENTES.find((s) => s.clave === fuente);
+  if (!DESGLOSE[fuente]) return [{ nombre: info.nombre, color: info.color, valores: delResumen(fuente), destino: null }];
+
+  const fechas = new Set(filas.map((f) => f.fecha));
+  const detalle = estado.detalle.filter((d) => fechas.has(d.fecha) && fuenteDe(d) === fuente);
+  const sumar = (incluye) => {
+    const valores = new Map();
+    for (const d of detalle) if (incluye(d.nombre)) valores.set(d.fecha, (valores.get(d.fecha) || 0) + num(d.mwh));
+    return valores;
+  };
+  const colorDe = (nombre) => DESGLOSE[fuente].find(([n]) => n === nombre)?.[1] || "--otras";
+  if (central) return [{ nombre: central, color: colorDe(central), valores: sumar((n) => n === central), destino: null }];
+
+  // Las centrales con nombre fijo conservan su color; el resto se agrupa en gris.
+  const fijas = DESGLOSE[fuente].map(([n]) => n);
+  const series = DESGLOSE[fuente].map(([nombre, color]) => ({
+    nombre, color, valores: sumar((n) => n === nombre), destino: { fuente, central: nombre },
+  }));
+  const resto = [...new Set(detalle.map((d) => d.nombre).filter((n) => !fijas.includes(n)))];
+  if (resto.length) {
+    series.push({
+      nombre: resto.length === 1 ? resto[0] : "Otras", color: "--otras", valores: sumar((n) => resto.includes(n)),
+      destino: resto.length === 1 ? { fuente, central: resto[0] } : null,
+    });
+  }
+  return series.filter((s) => s.valores.size);
+}
+
+function centralesDe(fuente) {
+  const fijas = (DESGLOSE[fuente] || []).map(([n]) => n);
+  const todas = [...new Set(estado.detalle.filter((d) => fuenteDe(d) === fuente).map((d) => d.nombre))];
+  return [...fijas.filter((n) => todas.includes(n)), ...todas.filter((n) => !fijas.includes(n))];
+}
+
+function irA(destino) {
+  estado.drill = { fuente: destino.fuente || "", central: destino.central || "" };
+  sincronizarDrill();
+  renderDiario();
+}
+
+function sincronizarDrill() {
+  const { fuente, central } = estado.drill;
+  const selFuente = document.getElementById("drill-fuente");
+  const selCentral = document.getElementById("drill-central");
+  selFuente.value = fuente;
+  const opciones = fuente && DESGLOSE[fuente] ? centralesDe(fuente) : [];
+  selCentral.replaceChildren(el("option", { value: "" }, opciones.length ? "Todas" : "—"),
+    ...opciones.map((n) => el("option", { value: n }, n)));
+  selCentral.disabled = !opciones.length;
+  selCentral.value = central;
+
+  // Ruta de navegación: cada nivel anterior es un botón para volver.
+  const niveles = [{ texto: "Todas las fuentes", destino: {} }];
+  if (fuente) niveles.push({ texto: FUENTES.find((s) => s.clave === fuente).nombre, destino: { fuente } });
+  if (central) niveles.push({ texto: central, destino: { fuente, central } });
+  document.getElementById("ruta-diario").replaceChildren(...niveles.flatMap((n, i) => {
+    const ultimo = i === niveles.length - 1;
+    const nodo = ultimo ? el("span", { "aria-current": "page" }, n.texto) : el("button", { type: "button" }, n.texto);
+    if (!ultimo) nodo.addEventListener("click", () => irA(n.destino));
+    return i ? [el("span", { class: "separador", "aria-hidden": "true" }, "›"), nodo] : [nodo];
+  }));
+}
+
 function renderDiario() {
   const filas = filasEnRango();
   const { desde, hasta } = estado.rango;
+  const { fuente, central } = estado.drill;
+  const series = seriesDiarias(filas);
+  const nombreFuente = FUENTES.find((s) => s.clave === fuente)?.nombre;
 
+  // Indicadores según el nivel.
   const total = filas.reduce((s, f) => s + (num(f.produccion_total_mwh) || 0), 0);
   const suma = (k) => filas.reduce((s, f) => s + (num(f[k]) || 0), 0);
-  const pico = filas.reduce((m, f) => (num(f.demanda_max_mw) > (m ? num(m.demanda_max_mw) : -1) ? f : m), null);
-  const neto = suma("importacion_mwh") - suma("exportacion_mwh");
-  document.getElementById("tiles-diario").replaceChildren(
-    tile("Producción total", fmt(total / 1000, 1), "GWh", `${dias(filas.length)} con datos`),
-    tile("Hidráulica", pct(suma("hidraulica_mwh"), total), "", `${fmt(suma("hidraulica_mwh") / 1000, 1)} GWh`),
-    tile("Térmica", pct(suma("termica_mwh"), total), "", `${fmt(suma("termica_mwh") / 1000, 1)} GWh`),
-    tile("Demanda máxima", pico ? fmt(num(pico.demanda_max_mw)) : "—", "MW",
-      pico ? `${fechaLarga(pico.fecha)}, ${pico.hora_demanda_max}` : ""),
-    tile("Intercambio neto", fmt(neto), "MWh", neto >= 0 ? "importación neta" : "exportación neta"),
-  );
+  const nDias = dias(filas.length);
+  let tiles;
+  if (!fuente) {
+    const pico = filas.reduce((m, f) => (num(f.demanda_max_mw) > (m ? num(m.demanda_max_mw) : -1) ? f : m), null);
+    const neto = suma("importacion_mwh") - suma("exportacion_mwh");
+    tiles = [
+      tile("Producción total", fmt(total / 1000, 1), "GWh", `${nDias} con datos`),
+      tile("Hidráulica", pct(suma("hidraulica_mwh"), total), "", `${fmt(suma("hidraulica_mwh") / 1000, 1)} GWh`),
+      tile("Térmica", pct(suma("termica_mwh"), total), "", `${fmt(suma("termica_mwh") / 1000, 1)} GWh`),
+      tile("Demanda máxima", pico ? fmt(num(pico.demanda_max_mw)) : "—", "MW",
+        pico ? `${fechaLarga(pico.fecha)}, ${pico.hora_demanda_max}` : ""),
+      tile("Intercambio neto", fmt(neto), "MWh", neto >= 0 ? "importación neta" : "exportación neta"),
+    ];
+  } else {
+    // Energía del nivel por día y totales para comparar con el nivel superior.
+    const porDia = filas.map((f) => ({ fecha: f.fecha, mwh: series.reduce((s, x) => s + (x.valores.get(f.fecha) || 0), 0) }));
+    const energia = porDia.reduce((s, d) => s + d.mwh, 0);
+    const conDatos = porDia.filter((d) => d.mwh > 0);
+    const max = conDatos.reduce((m, d) => (!m || d.mwh > m.mwh ? d : m), null);
+    const min = conDatos.reduce((m, d) => (!m || d.mwh < m.mwh ? d : m), null);
+    const promedio = filas.length ? energia / filas.length : 0;
+    const totalFuente = suma(`${fuente}_mwh`);
+    tiles = [
+      tile(central ? `Producción ${central}` : nombreFuente, fmt(energia / 1000, 1), "GWh", `${nDias} con datos`),
+      tile("Promedio diario", fmt(promedio), "MWh", `≈ ${fmt(promedio / 24)} MW en promedio`),
+      central
+        ? tile(`Participación en ${nombreFuente.toLowerCase()}`, pct(energia, totalFuente), "", `de ${fmt(totalFuente / 1000, 1)} GWh`)
+        : tile("Participación en la producción", pct(energia, total), "", `de ${fmt(total / 1000, 1)} GWh`),
+    ];
+    if (!central && series.length > 1) {
+      const principal = series.map((s) => ({ s, mwh: [...s.valores.values()].reduce((a, b) => a + b, 0) }))
+        .sort((a, b) => b.mwh - a.mwh)[0];
+      tiles.push(tile("Mayor aporte", principal.s.nombre, "", `${pct(principal.mwh, energia)} de ${nombreFuente.toLowerCase()}`));
+    }
+    const que = fuente === "importacion" ? "importación" : "producción";
+    tiles.push(tile(`Día de mayor ${que}`, max ? fmt(max.mwh) : "—", "MWh", max ? fechaLarga(max.fecha) : ""));
+    if (central || series.length === 1) {
+      tiles.push(tile(`Día de menor ${que}`, min ? fmt(min.mwh) : "—", "MWh", min ? fechaLarga(min.fecha) : ""));
+    }
+  }
+  document.getElementById("tiles-diario").replaceChildren(...tiles);
+
+  const titulos = {
+    "": "Producción diaria por fuente",
+    hidraulica: "Producción hidroeléctrica diaria por central",
+    termica: "Producción térmica diaria por tipo",
+    no_convencional: "Producción no convencional diaria",
+    importacion: "Importación diaria",
+  };
+  document.getElementById("titulo-produccion").textContent = central ? `${central}: producción diaria` : titulos[fuente];
+  const clicable = series.some((s) => s.destino);
+  document.getElementById("pista-produccion").textContent = clicable
+    ? "Haz clic en una barra para ver su detalle." : "";
 
   const completa = filas.length ? serieCompleta(filas, desde, hasta) : [];
   const x = completa.map((f) => f.fecha);
   // Con rangos largos cada barra mide pocos píxeles: sin separador para que no desaparezca.
-  const pxPorDia = (document.getElementById("g-produccion").clientWidth - 70) / Math.max(completa.length, 1);
+  const nodo = document.getElementById("g-produccion");
+  const pxPorDia = (nodo.clientWidth - 70) / Math.max(completa.length, 1);
   const separador = pxPorDia >= 8 ? 1.5 : 0;
-  const trazas = FUENTES.map((s) => ({
+  const trazas = series.map((s) => ({
     type: "bar", name: s.nombre, x,
-    y: completa.map((f) => (f._vacio ? null : num(f[`${s.clave}_mwh`]) / 1000)),
+    y: completa.map((f) => (f._vacio ? null : s.valores.get(f.fecha) ?? null)),
     marker: { color: css(s.color), line: { color: css("--superficie"), width: separador } },
-    hovertemplate: `${s.nombre}: %{y:,.2f} GWh<extra></extra>`,
+    hovertemplate: `${s.nombre}: %{y:,.0f} MWh<extra></extra>`,
   }));
-  dibujar("g-produccion", trazas, layoutBase({ barmode: "stack", xaxis: { ...layoutBase().xaxis, type: "date" } }), {
+  dibujar("g-produccion", trazas, layoutBase({
+    barmode: "stack", showlegend: series.length > 1, xaxis: { ...layoutBase().xaxis, ...ejeDias(completa.length) },
+  }), {
     columnas: [
       { clave: "fecha", titulo: "Fecha" },
-      ...FUENTES.map((s) => ({ clave: `${s.clave}_mwh`, titulo: `${s.nombre} (MWh)`, fmt: (v) => fmt(num(v)) })),
-      { clave: "exportacion_mwh", titulo: "Exportación (MWh)", fmt: (v) => fmt(num(v)) },
-      { clave: "produccion_total_mwh", titulo: "Total (MWh)", fmt: (v) => fmt(num(v)) },
+      ...series.map((s, i) => ({ clave: `s${i}`, titulo: `${s.nombre} (MWh)`, fmt: (v) => fmt(v) })),
+      ...(series.length > 1 ? [{ clave: "total", titulo: "Total (MWh)", fmt: (v) => fmt(v) }] : []),
     ],
-    filas: [...filas].reverse(),
+    filas: [...filas].reverse().map((f) => {
+      const fila = { fecha: f.fecha };
+      series.forEach((s, i) => { fila[`s${i}`] = s.valores.get(f.fecha) ?? null; });
+      fila.total = series.reduce((t, s) => t + (s.valores.get(f.fecha) || 0), 0);
+      return fila;
+    }),
   });
+  // Clic en una barra: bajar al detalle de esa serie.
+  if (nodo.on) {
+    nodo.removeAllListeners?.("plotly_click");
+    nodo.on("plotly_click", (ev) => {
+      const destino = series.find((s) => s.nombre === ev.points?.[0]?.data?.name)?.destino;
+      if (destino) irA(destino);
+    });
+  }
 
   dibujar("g-demanda", [{
     type: "scatter", mode: "lines+markers", name: "Demanda máxima", x,
@@ -195,7 +347,7 @@ function renderDiario() {
     customdata: completa.map((f) => f.hora_demanda_max || ""),
     line: { color: css("--tinta"), width: 2 }, marker: { size: 8, color: css("--tinta"), line: { color: css("--superficie"), width: 2 } },
     connectgaps: false, hovertemplate: "Demanda máxima: %{y:,.0f} MW a las %{customdata}<extra></extra>",
-  }], layoutBase({ showlegend: false, yaxis: { ...layoutBase().yaxis, rangemode: "normal" }, xaxis: { ...layoutBase().xaxis, type: "date" } }), {
+  }], layoutBase({ showlegend: false, yaxis: { ...layoutBase().yaxis, rangemode: "normal" }, xaxis: { ...layoutBase().xaxis, ...ejeDias(completa.length) } }), {
     columnas: [
       { clave: "fecha", titulo: "Fecha" },
       { clave: "demanda_max_mw", titulo: "Demanda máx. (MW)", fmt: (v) => fmt(num(v)) },
@@ -493,6 +645,13 @@ function iniciarControles() {
       render();
     });
   }
+
+  // Drilldown de la serie diaria: fuente → central.
+  const selFuente = document.getElementById("drill-fuente");
+  selFuente.replaceChildren(el("option", { value: "" }, "Todas"), ...FUENTES.map((s) => el("option", { value: s.clave }, s.nombre)));
+  selFuente.addEventListener("change", () => irA({ fuente: selFuente.value }));
+  document.getElementById("drill-central").addEventListener("change", (e) => irA({ fuente: estado.drill.fuente, central: e.target.value }));
+  sincronizarDrill();
 
   const selDia = document.getElementById("dia");
   selDia.replaceChildren(...[...estado.resumen].reverse().map((f) => el("option", { value: f.fecha }, fechaLarga(f.fecha))));

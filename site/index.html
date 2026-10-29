@@ -41,10 +41,14 @@
         </div>
         <label>Desde <input type="date" id="desde"></label>
         <label>Hasta <input type="date" id="hasta"></label>
+        <label>Fuente <select id="drill-fuente"></select></label>
+        <label>Central <select id="drill-central"></select></label>
       </div>
+      <nav class="ruta" id="ruta-diario" aria-label="Nivel de detalle"></nav>
       <div class="tiles" id="tiles-diario"></div>
       <article class="tarjeta">
-        <header><h2>Producción diaria por fuente <span class="unidad">GWh</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-produccion">Ver tabla</button></header>
+        <header><h2><span id="titulo-produccion">Producción diaria por fuente</span> <span class="unidad">MWh</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-produccion">Ver tabla</button></header>
+        <p class="nota pista" id="pista-produccion"></p>
         <div id="g-produccion" class="grafico"></div>
       </article>
       <article class="tarjeta">
