@@ -121,7 +121,7 @@
       <div class="tiles" id="tiles-alerta"></div>
       <article class="tarjeta">
         <header><h2>Cota del embalse de Mazar <span class="unidad">msnm, por día del año</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-cota">Ver tabla</button></header>
-        <p class="nota pista">Mazar regula el agua de Mazar, Paute-Molino y Sopladora. Las líneas de color son los años de crisis; en gris, los demás años.</p>
+        <p class="nota pista">Mazar regula el agua de Mazar, Paute-Molino y Sopladora. Las líneas de color son los años de crisis; en gris, los demás años. La línea roja es el límite operativo (2.115 msnm) y la franja, sus 3 m críticos.</p>
         <div id="g-cota" class="grafico"></div>
       </article>
       <div class="dos-columnas">
@@ -145,10 +145,15 @@
           <li><strong>Normal:</strong> el dato está dentro de lo observado en años normales, o no es claramente peor que todos ellos. Para eso hay una holgura de 1 m en la cota, 10 % en los caudales y 1 punto en la participación térmica. Con Mazar a menos de 5 m de su máximo histórico tampoco hay alarma.</li>
           <li><strong>Vigilancia:</strong> es claramente peor que todos los años normales, pero mejor que los de crisis.</li>
           <li><strong>Alerta:</strong> es claramente peor que los años normales e igual o peor que al menos uno de los años de crisis en esa fecha.</li>
-          <li><strong>Tendencia de Mazar:</strong> con la variación de la cota en los últimos 14 días se estima cuántos días faltan para llegar al mínimo de abril de 2024. Alerta si son menos de 30 días; vigilancia si son menos de 90.</li>
-          <li><strong>Estado general:</strong> alerta si el nivel de Mazar está en alerta o si hay dos o más indicadores en alerta; vigilancia si hay algún indicador en alerta o dos o más en vigilancia.</li>
+          <li><strong>Límite operativo de Mazar: 2.115 msnm.</strong> En 2023 el embalse se sostuvo justo encima (racionamientos); en 2024 estuvo 67 días por debajo (apagones de abril y de octubre a diciembre). Con Mazar a 3 m o menos del límite, el nivel está en alerta sin importar la fecha.</li>
+          <li><strong>Días hasta 2.115 msnm:</strong> se proyecta la caída de la cota con el ritmo de los últimos 14 días y con el de los últimos 30, y se usa el más rápido, para no ocultar una caída sostenida tras unos días de pausa. Alerta si son menos de 30 días; vigilancia si son menos de 90.</li>
+          <li><strong>Estado general:</strong> sale solo de los cuatro indicadores de agua. Alerta si el nivel de Mazar está en alerta o hay dos o más en alerta; vigilancia si hay alguno en alerta o dos o más en vigilancia. La dependencia térmica se muestra como contexto: indica cuánto se apoya el sistema en la térmica, no cuánta agua hay.</li>
         </ul>
-        <p><strong>Prueba con datos históricos:</strong> aplicadas a cada día del pasado, con los años anteriores como referencia, las reglas del nivel de Mazar habrían marcado alerta en 114 de los 122 días de septiembre a diciembre de 2024 (apagones) y en la mayoría de los días de la crisis de abril de 2024. En 2025, un año normal, solo marcaron alerta 9 de 365 días.</p>
+        <p><strong>Prueba con datos históricos:</strong> aplicadas a cada día del pasado, con los años anteriores como referencia:</p>
+        <ul>
+          <li>El nivel de Mazar habría marcado alerta todo abril de 2024 y 117 de los 122 días de septiembre a diciembre de 2024. En 2025, un año normal, solo 9 de 365 días.</li>
+          <li>"Días hasta 2.115" habría avisado 23 días antes de que Mazar bajara de 2.118 en 2023, 57 días antes en marzo de 2024 y 16 días antes en septiembre de 2024. En 2025 no tuvo días de alerta.</li>
+        </ul>
         <p>Es un semáforo indicativo, no una evaluación oficial. Mira solo Mazar y el río Coca (no todos los embalses), usa la altura del embalse y no su volumen, y una participación térmica alta también puede ser una decisión deliberada para ahorrar agua. Hidrología: API de CELEC, vía el repositorio <a href="https://github.com/jp1309/celec" rel="noopener">jp1309/celec</a>; el caudal del río Coca suele publicarse con unos días de atraso. Térmica: serie mensual oficial y acumulado del mes de CENACE.</p>
       </details>
     </section>

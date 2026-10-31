@@ -586,6 +586,10 @@ function renderIntercambio() {
 
 // Años de racionamientos y apagones; los demás años anteriores al actual son la referencia normal.
 const ANIOS_CRISIS = ["2023", "2024"];
+// Cota mínima operativa de Mazar: en 2023 se sostuvo justo encima (racionamientos) y en 2024 se
+// perforó durante 67 días (apagones). A menos de 3 m de ella el nivel se considera crítico.
+const LIMITE_MAZAR = 2115;
+const MARGEN_CRITICO = 3;
 const ESTADOS = {
   normal: { texto: "Normal", icono: "✓" },
   vigilancia: { texto: "Vigilancia", icono: "!" },
@@ -664,28 +668,33 @@ function indicadoresAlerta() {
     const refs = refsDe(fC, (d) => num(porFecha.get(d)?.mazar_cota_msnm));
     const parecido = refs.filter((r) => r.valor != null).sort((a, b) => Math.abs(a.valor - v) - Math.abs(b.valor - v))[0];
     const maxHistorico = Math.max(...hidro.map((f) => num(f.mazar_cota_msnm)).filter((x) => x != null));
+    const margen = v - LIMITE_MAZAR;
     out.cota = {
-      titulo: "Nivel de Mazar", valor: fmt(v, 1), unidad: "msnm", fecha: fC, parecido,
-      estado: clasificar(v, refs, { ...REGLA_COTA, seguro: maxHistorico - 5 }),
-      detalle: [de(refs, "2024") != null ? difTexto(v - de(refs, "2024"), "2024", "m") : "",
+      titulo: "Nivel de Mazar", valor: fmt(v, 1), unidad: "msnm", fecha: fC, parecido, margen,
+      // Cerca del límite operativo es alerta sin importar la fecha; si no, se compara con otros años.
+      estado: margen <= MARGEN_CRITICO ? "alerta" : clasificar(v, refs, { ...REGLA_COTA, seguro: maxHistorico - 5 }),
+      detalle: [margen >= 0 ? `${fmt(margen, 1)} m sobre el límite de ${fmt(LIMITE_MAZAR)}` : `${fmt(-margen, 1)} m bajo el límite de ${fmt(LIMITE_MAZAR)}`,
+        de(refs, "2024") != null ? difTexto(v - de(refs, "2024"), "2024", "m") : "",
         normalesDe(refs) != null ? difTexto(v - normalesDe(refs), "años normales", "m") : ""].filter(Boolean).join(" · "),
     };
 
-    // 3. Tendencia: días hasta el mínimo de los años de crisis al ritmo de los últimos 14 días.
-    const minimo = hidro.filter((f) => ANIOS_CRISIS.includes(f.fecha.slice(0, 4)) && num(f.mazar_cota_msnm) != null)
-      .reduce((m, f) => (!m || num(f.mazar_cota_msnm) < num(m.mazar_cota_msnm) ? f : m), null);
-    const antes = num(porFecha.get(sumarDias(fC, -14))?.mazar_cota_msnm);
-    if (minimo && antes != null) {
-      const cotaMin = num(minimo.mazar_cota_msnm);
+    // 3. Días hasta el límite operativo, al ritmo de descenso de los últimos 14 y 30 días. Se usa el
+    // más rápido de los dos para no perder una caída sostenida por unos días de pausa.
+    const ritmo = (dias) => {
+      const antes = num(porFecha.get(sumarDias(fC, -dias))?.mazar_cota_msnm);
+      if (antes == null) return null;
       const delta = v - antes;
-      const ritmo = -delta / 14;
-      const diasRestantes = ritmo > 0 ? (v - cotaMin) / ritmo : null;
-      const est = v <= cotaMin ? "alerta" : diasRestantes == null ? "normal" : diasRestantes < 30 ? "alerta" : diasRestantes < 90 ? "vigilancia" : "normal";
+      return { dias, delta, hasta: margen <= 0 ? 0 : delta < 0 ? margen / (-delta / dias) : Infinity };
+    };
+    const ritmos = [ritmo(14), ritmo(30)].filter(Boolean);
+    if (ritmos.length) {
+      const peor = ritmos.reduce((a, b) => (b.hasta < a.hasta ? b : a));
+      const est = peor.hasta < 30 ? "alerta" : peor.hasta < 90 ? "vigilancia" : "normal";
+      const textoDias = (h) => (h === Infinity ? "se mantiene o sube" : h > 365 ? "más de un año" : h === 0 ? "ya está bajo el límite" : `unos ${fmt(h)} días`);
       out.tendencia = {
-        titulo: "Tendencia de Mazar (14 días)", valor: `${delta >= 0 ? "+" : "−"}${fmt(Math.abs(delta), 1)}`, unidad: "m", fecha: fC, estado: est,
-        minimo: { fecha: minimo.fecha, cota: cotaMin },
-        detalle: diasRestantes == null ? "El embalse está subiendo o estable."
-          : `A este ritmo llegaría al mínimo de ${fechaCorta(minimo.fecha)} (${fmt(cotaMin, 1)}) en unos ${fmt(diasRestantes)} días.`,
+        titulo: `Días hasta ${fmt(LIMITE_MAZAR)} msnm`, fecha: fC, estado: est,
+        valor: peor.hasta === Infinity ? "—" : peor.hasta > 365 ? "> 365" : fmt(peor.hasta), unidad: peor.hasta === Infinity ? "" : "días",
+        detalle: ritmos.map((r) => `Al ritmo de ${r.dias} días (${r.delta >= 0 ? "+" : "−"}${fmt(Math.abs(r.delta), 1)} m): ${textoDias(r.hasta)}`).join(" · "),
       };
     }
   }
@@ -696,10 +705,15 @@ function indicadoresAlerta() {
     if (!f) return null;
     const v = mediaVentana(porFecha, f, 14, col);
     const refs = refsDe(f, (d) => mediaVentana(porFecha, d, 14, col));
+    // Si hay un solo año normal de referencia se nombra ese año, no "años normales".
+    const normales = refs.filter((r) => !ANIOS_CRISIS.includes(r.anio) && r.valor != null);
+    const etiquetaNormal = normales.length === 1 ? normales[0].anio : "años normales";
+    const recientes = mediaVentana(porFecha, f, 3, col);
     return {
       titulo, valor: fmt(v), unidad: "m³/s", fecha: f, estado: clasificar(v, refs, REGLA_CAUDAL),
       detalle: [de(refs, "2024") != null ? `2024: ${fmt(de(refs, "2024"))}` : "",
-        normalesDe(refs) != null ? `años normales: ${fmt(normalesDe(refs))}` : ""].filter(Boolean).join(" · ") + " (media de 14 días)",
+        normales.length ? `${etiquetaNormal}: ${fmt(normalesDe(refs))}` : ""].filter(Boolean).join(" · ") +
+        ` (media de 14 días)${recientes != null ? ` · últimos 3 días: ${fmt(recientes)}` : ""}`,
     };
   };
   out.caudal = caudal("mazar_caudal_m3s", "Caudal de entrada a Mazar");
@@ -714,8 +728,10 @@ function indicadoresAlerta() {
       return { anio: a, valor: m ? num(m.termica_gwh) / num(m.total_gwh) : null };
     });
     const normales = refs.filter((r) => !ANIOS_CRISIS.includes(r.anio) && r.valor != null).map((r) => r.valor);
+    // Es contexto: muestra la respuesta del sistema (quemar más térmica), no el riesgo hídrico en
+    // sí, y en 2026 también refleja más capacidad térmica y la decisión de ahorrar agua.
     out.termica = {
-      titulo: "Dependencia térmica", valor: fmt(100 * v, 1), unidad: "%",
+      titulo: "Dependencia térmica (contexto)", contexto: true, valor: fmt(100 * v, 1), unidad: "%",
       fecha: `${op.anio}-${String(op.mes).padStart(2, "0")}-${String(op.hasta_dia).padStart(2, "0")}`,
       estado: clasificar(v, refs, REGLA_TERMICA),
       detalle: [...ANIOS_CRISIS.filter((a) => de(refs, a) != null).map((a) => `${MESES[op.mes - 1]} ${a}: ${fmt(100 * de(refs, a))} %`),
@@ -732,19 +748,23 @@ function renderAlerta() {
   }
   const ind = indicadoresAlerta();
   const lista = [ind.cota, ind.tendencia, ind.caudal, ind.coca, ind.termica].filter(Boolean);
-  const cuenta = (e) => lista.filter((i) => i.estado === e).length;
+  // El estado general sale solo de los indicadores de agua; la térmica es contexto.
+  const hidricos = lista.filter((i) => !i.contexto);
+  const cuenta = (e) => hidricos.filter((i) => i.estado === e).length;
   const general = ind.cota?.estado === "alerta" || cuenta("alerta") >= 2 ? "alerta"
     : cuenta("alerta") >= 1 || cuenta("vigilancia") >= 2 ? "vigilancia" : "normal";
   const partes = [["alerta", "en alerta", "en alerta"], ["vigilancia", "en vigilancia", "en vigilancia"], ["normal", "normal", "normales"]]
     .filter(([e]) => cuenta(e)).map(([e, uno, varios]) => `${cuenta(e)} ${cuenta(e) === 1 ? uno : varios}`);
   const parecido = ind.cota?.parecido;
+  const margen = ind.cota?.margen;
   document.getElementById("estado-general").className = `estado-general ${general}`;
   document.getElementById("estado-general").replaceChildren(
     el("span", { class: `insignia ${general}`, "aria-hidden": "true" }, ESTADOS[general].icono),
     el("div", {},
       el("h2", {}, `Estado general: ${ESTADOS[general].texto}`),
-      el("p", {}, `De ${lista.length} indicadores: ${partes.join(", ")}.` +
-        (parecido ? ` En esta fecha, la cota de Mazar se parece más a la de ${parecido.anio} (${fmt(parecido.valor, 1)} msnm).` : ""))),
+      el("p", {}, (margen != null ? `Mazar está ${fmt(Math.abs(margen), 1)} m ${margen >= 0 ? "sobre" : "bajo"} su límite operativo de ${fmt(LIMITE_MAZAR)} msnm. ` : "") +
+        `De ${hidricos.length} indicadores de agua: ${partes.join(", ")}.` +
+        (parecido ? ` En esta fecha, la cota se parece más a la de ${parecido.anio} (${fmt(parecido.valor, 1)} msnm).` : ""))),
   );
   document.getElementById("tiles-alerta").replaceChildren(...lista.map(tileEstado));
 
@@ -776,12 +796,15 @@ function renderAlerta() {
 
   const cota = porAnio("mazar_cota_msnm", (f) => num(f.mazar_cota_msnm));
   cota.forEach((t) => { t.hovertemplate = `${t.name}: %{y:,.1f} msnm<extra></extra>`; });
-  const minimo = ind.tendencia?.minimo;
   dibujar("g-cota", cota, layoutBase({
     xaxis: ejeAnio, yaxis: { ...layoutBase().yaxis, rangemode: "normal", tickformat: ",~r" },
-    shapes: minimo ? [{ type: "line", xref: "paper", x0: 0, x1: 1, y0: minimo.cota, y1: minimo.cota, line: { color: css("--tinta-2"), width: 1 } }] : [],
-    annotations: minimo ? [{ xref: "paper", x: 0.01, y: minimo.cota, yanchor: "bottom", xanchor: "left", showarrow: false,
-      text: `Mínimo de ${fechaCorta(minimo.fecha)}: ${fmt(minimo.cota, 1)}`, font: { color: css("--tinta-2"), size: 11 } }] : [],
+    // Franja crítica (límite + 3 m) y línea del límite operativo.
+    shapes: [
+      { type: "rect", xref: "paper", x0: 0, x1: 1, y0: LIMITE_MAZAR, y1: LIMITE_MAZAR + MARGEN_CRITICO, fillcolor: css("--estado-alerta"), opacity: 0.1, line: { width: 0 }, layer: "below" },
+      { type: "line", xref: "paper", x0: 0, x1: 1, y0: LIMITE_MAZAR, y1: LIMITE_MAZAR, line: { color: css("--estado-alerta"), width: 1.5 } },
+    ],
+    annotations: [{ xref: "paper", x: 0.01, y: LIMITE_MAZAR, yanchor: "top", xanchor: "left", showarrow: false,
+      text: `Límite operativo: ${fmt(LIMITE_MAZAR)} msnm`, font: { color: css("--tinta-2"), size: 11 } }],
   }), tablaReciente([
     { clave: "mazar_cota_msnm", titulo: `Cota ${actual} (msnm)`, fmt: (v) => fmt(num(v), 2) },
     ...ANIOS_CRISIS.map((a) => ({ clave: `_${a}`, titulo: `Misma fecha ${a}`, fmt: (_, f) => fmt(num(porFecha.get(mismaFecha(f.fecha, a))?.mazar_cota_msnm), 2) })),
