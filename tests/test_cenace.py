@@ -4,6 +4,7 @@ Ejecutar desde la raíz del repo:  python -m unittest discover -s tests
 """
 
 import datetime as dt
+import gzip
 import sys
 import tempfile
 import unittest
@@ -88,6 +89,64 @@ class TestExtraerMensual(unittest.TestCase):
             self.assertEqual(cenace.guardar_mes(self.mes, datos=datos), "sin cambios")  # día 25 < 26
             _, filas = cenace._leer_csv(datos / "mensual_operativo.csv")
             self.assertEqual([(f["hasta_dia"], f["importacion_mwh"]) for f in filas], [("26", "3200")])
+
+
+class TestHuecos(unittest.TestCase):
+    """Días que CENACE se salta en la pestaña diaria, con páginas reales de oct-nov 2026."""
+
+    @staticmethod
+    def pagina(fecha):
+        with gzip.open(RAIZ / "tests" / "fixtures" / "paginas" / f"{fecha}.html.gz", "rt", encoding="utf-8") as f:
+            return f.read()
+
+    def preparar(self, datos, *fechas):
+        for fecha in fechas:
+            html = self.pagina(fecha)
+            cenace.guardar_dia(cenace.extraer_diario(html), html=html, datos=datos)
+            cenace.guardar_mes(cenace.extraer_mensual(html), datos=datos)
+
+    def test_acumulado_anual(self):
+        acum = cenace._acumulado_anual(FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(acum["fecha"], dt.date(2026, 10, 25))
+        self.assertAlmostEqual(acum["produccion_total"], 30489000, delta=1000)
+
+    def test_hueco_coincide_con_el_dia_conocido(self):
+        # Se omite el 28-oct, que sí se conoce: la cuenta debe dar exactamente ese día.
+        with tempfile.TemporaryDirectory() as tmp:
+            datos = Path(tmp)
+            self.preparar(datos, "2026-10-27", "2026-10-29")
+            self.assertTrue(cenace.actualizar_huecos(datos=datos))
+            _, huecos = cenace._leer_csv(datos / "diario_huecos.csv")
+            self.assertEqual([(h["desde"], h["hasta"], h["dias"]) for h in huecos], [("2026-10-28", "2026-10-28", "1")])
+            dia = cenace.extraer_diario(self.pagina("2026-10-28"))["resumen"]
+            for k in ("produccion_total_mwh", "hidraulica_mwh", "termica_mwh", "importacion_mwh", "exportacion_mwh"):
+                self.assertAlmostEqual(float(huecos[0][k]), float(dia[k]), delta=0.5)
+
+    def test_salto_de_mes_cierra_el_mes_anterior(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            datos = Path(tmp)
+            self.preparar(datos, "2026-10-29", "2026-11-01")
+            acumulado_29 = cenace.extraer_mensual(self.pagina("2026-10-29"))
+            self.assertTrue(cenace.actualizar_huecos(datos=datos))
+            self.assertFalse(cenace.actualizar_huecos(datos=datos))  # idempotente
+            _, huecos = cenace._leer_csv(datos / "diario_huecos.csv")
+            self.assertEqual((huecos[0]["desde"], huecos[0]["hasta"], huecos[0]["dias"]), ("2026-10-30", "2026-10-31", "2"))
+            _, meses = cenace._leer_csv(datos / "mensual_operativo.csv")
+            octubre, noviembre = meses
+            self.assertEqual((octubre["hasta_dia"], octubre["completo"], octubre["origen"]), ("31", "si", cenace.METODO_ACUMULADO))
+            self.assertAlmostEqual(float(octubre["produccion_total_mwh"]),
+                                   float(acumulado_29["produccion_total_mwh"]) + float(huecos[0]["produccion_total_mwh"]), delta=0.5)
+            self.assertAlmostEqual(float(octubre["importacion_mwh"]),
+                                   float(acumulado_29["importacion_mwh"]) + float(huecos[0]["importacion_mwh"]), delta=0.5)
+            self.assertEqual((noviembre["mes"], noviembre["hasta_dia"], noviembre["completo"]), ("11", "1", "no"))
+
+    def test_sin_saltos_no_hay_huecos(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            datos = Path(tmp)
+            self.preparar(datos, "2026-10-27", "2026-10-28")
+            cenace.actualizar_huecos(datos=datos)
+            _, huecos = cenace._leer_csv(datos / "diario_huecos.csv")
+            self.assertEqual(huecos, [])
 
 
 class TestHidrologia(unittest.TestCase):

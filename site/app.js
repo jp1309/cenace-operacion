@@ -2,7 +2,7 @@
 "use strict";
 
 const estado = {
-  resumen: [], curva: [], detalle: [], mensual: [], anual: [], operativo: [], hidro: [], meta: null,
+  resumen: [], curva: [], detalle: [], mensual: [], anual: [], operativo: [], hidro: [], huecos: [], meta: null,
   rango: { desde: null, hasta: null }, dia: null, periodo: { desde: null, hasta: null },
   drill: { fuente: "", central: "" },
   vista: "diario", tablas: {}, modoTabla: {},
@@ -183,9 +183,11 @@ function seriesDiarias(filas) {
 
   const fechas = new Set(filas.map((f) => f.fecha));
   const detalle = estado.detalle.filter((d) => fechas.has(d.fecha) && fuenteDe(d) === fuente);
+  const diasConDetalle = [...new Set(detalle.map((d) => d.fecha))];
+  // CENACE omite la central que no generó ese día: cuenta como 0, no como dato faltante.
   const sumar = (incluye) => {
-    const valores = new Map();
-    for (const d of detalle) if (incluye(d.nombre)) valores.set(d.fecha, (valores.get(d.fecha) || 0) + num(d.mwh));
+    const valores = new Map(diasConDetalle.map((f) => [f, 0]));
+    for (const d of detalle) if (incluye(d.nombre)) valores.set(d.fecha, valores.get(d.fecha) + num(d.mwh));
     return valores;
   };
   const colorDe = (nombre) => DESGLOSE[fuente].find(([n]) => n === nombre)?.[1] || "--otras";
@@ -203,7 +205,45 @@ function seriesDiarias(filas) {
       destino: resto.length === 1 ? { fuente, central: resto[0] } : null,
     });
   }
-  return series.filter((s) => s.valores.size);
+  return series.filter((s) => [...s.valores.values()].some((v) => v > 0));
+}
+
+// Días que CENACE no publicó (saltos de su pestaña diaria) que tocan el rango elegido.
+function huecosEnRango(desde, hasta) {
+  return estado.huecos.filter((h) => h.desde <= hasta && h.hasta >= desde);
+}
+
+function bandasHuecos(huecos, pxPorDia) {
+  return {
+    shapes: huecos.map((h) => ({
+      type: "rect", xref: "x", yref: "paper", x0: `${sumarDias(h.desde, -1)} 12:00`, x1: `${h.hasta} 12:00`, y0: 0, y1: 1,
+      fillcolor: css("--otras"), opacity: 0.25, line: { width: 0 }, layer: "below",
+    })),
+    annotations: huecos.filter((h) => pxPorDia * +h.dias >= 60).map((h) => ({
+      xref: "x", yref: "paper", x: `${h.desde} 12:00`, xanchor: +h.dias > 1 ? "center" : "auto", y: 1, yanchor: "top", showarrow: false,
+      text: "sin publicar", font: { color: css("--tinta-2"), size: 11 },
+    })),
+  };
+}
+
+const hoyEcuador = () => isoDe(new Date(Date.now() - 5 * 3600 * 1000));
+const rezagoDias = (iso) => Math.round((aFecha(hoyEcuador()) - aFecha(iso)) / 86400000);
+
+function avisoDiario(huecos) {
+  const partes = [];
+  const ultimo = estado.resumen[estado.resumen.length - 1]?.fecha;
+  // CENACE suele publicar con 2 o 3 días de rezago; más que eso se avisa.
+  if (ultimo && rezagoDias(ultimo) > 3) {
+    partes.push(`CENACE no ha publicado días más recientes: su último día es el ${fechaLarga(ultimo)}, hace ${dias(rezagoDias(ultimo))}. El robot revisa su página cada 2 horas y agregará los días en cuanto aparezcan.`);
+  }
+  for (const h of huecos.slice(-3)) {
+    const periodo = h.desde === h.hasta ? `el ${fechaLarga(h.desde)}` : `del ${fechaLarga(h.desde)} al ${fechaLarga(h.hasta)}`;
+    partes.push(`CENACE no publicó el detalle ${periodo}. Según su acumulado anual, ${+h.dias === 1 ? "ese día sumó" : `esos ${h.dias} días sumaron`} ` +
+      `${fmt(num(h.produccion_total_mwh))} MWh: hidráulica ${fmt(num(h.hidraulica_mwh))}, térmica ${fmt(num(h.termica_mwh))}, no convencional ${fmt(num(h.no_convencional_mwh))} e importación ${fmt(num(h.importacion_mwh))}.`);
+  }
+  const nodo = document.getElementById("aviso-diario");
+  nodo.textContent = partes.join(" ");
+  nodo.hidden = !partes.length;
 }
 
 function centralesDe(fuente) {
@@ -247,17 +287,21 @@ function renderDiario() {
   const { fuente, central } = estado.drill;
   const series = seriesDiarias(filas);
   const nombreFuente = FUENTES.find((s) => s.clave === fuente)?.nombre;
+  const huecos = huecosEnRango(desde, hasta);
+  avisoDiario(huecos);
 
   // Indicadores según el nivel.
   const total = filas.reduce((s, f) => s + (num(f.produccion_total_mwh) || 0), 0);
   const suma = (k) => filas.reduce((s, f) => s + (num(f[k]) || 0), 0);
+  const sinDetalle = huecos.reduce((s, h) => s + +h.dias, 0);
   const nDias = dias(filas.length);
+  const textoDias = `${nDias} con datos${sinDetalle ? ` · ${sinDetalle} sin publicar` : ""}`;
   let tiles;
   if (!fuente) {
     const pico = filas.reduce((m, f) => (num(f.demanda_max_mw) > (m ? num(m.demanda_max_mw) : -1) ? f : m), null);
     const neto = suma("importacion_mwh") - suma("exportacion_mwh");
     tiles = [
-      tile("Producción total", fmt(total / 1000, 1), "GWh", `${nDias} con datos`),
+      tile("Producción total", fmt(total / 1000, 1), "GWh", textoDias),
       tile("Hidráulica", pct(suma("hidraulica_mwh"), total), "", `${fmt(suma("hidraulica_mwh") / 1000, 1)} GWh`),
       tile("Térmica", pct(suma("termica_mwh"), total), "", `${fmt(suma("termica_mwh") / 1000, 1)} GWh`),
       tile("Demanda máxima", pico ? fmt(num(pico.demanda_max_mw)) : "—", "MW",
@@ -268,13 +312,12 @@ function renderDiario() {
     // Energía del nivel por día y totales para comparar con el nivel superior.
     const porDia = filas.map((f) => ({ fecha: f.fecha, mwh: series.reduce((s, x) => s + (x.valores.get(f.fecha) || 0), 0) }));
     const energia = porDia.reduce((s, d) => s + d.mwh, 0);
-    const conDatos = porDia.filter((d) => d.mwh > 0);
-    const max = conDatos.reduce((m, d) => (!m || d.mwh > m.mwh ? d : m), null);
-    const min = conDatos.reduce((m, d) => (!m || d.mwh < m.mwh ? d : m), null);
+    const max = porDia.reduce((m, d) => (!m || d.mwh > m.mwh ? d : m), null);
+    const min = porDia.reduce((m, d) => (!m || d.mwh < m.mwh ? d : m), null);
     const promedio = filas.length ? energia / filas.length : 0;
     const totalFuente = suma(`${fuente}_mwh`);
     tiles = [
-      tile(central ? `Producción ${central}` : nombreFuente, fmt(energia / 1000, 1), "GWh", `${nDias} con datos`),
+      tile(central ? `Producción ${central}` : nombreFuente, fmt(energia / 1000, 1), "GWh", textoDias),
       tile("Promedio diario", fmt(promedio), "MWh", `≈ ${fmt(promedio / 24)} MW en promedio`),
       central
         ? tile(`Participación en ${nombreFuente.toLowerCase()}`, pct(energia, totalFuente), "", `de ${fmt(totalFuente / 1000, 1)} GWh`)
@@ -319,6 +362,7 @@ function renderDiario() {
   }));
   dibujar("g-produccion", trazas, layoutBase({
     barmode: "stack", showlegend: series.length > 1, xaxis: { ...layoutBase().xaxis, ...ejeDias(completa.length) },
+    ...bandasHuecos(huecos, pxPorDia),
   }), {
     columnas: [
       { clave: "fecha", titulo: "Fecha" },
@@ -347,7 +391,10 @@ function renderDiario() {
     customdata: completa.map((f) => f.hora_demanda_max || ""),
     line: { color: css("--tinta"), width: 2 }, marker: { size: 8, color: css("--tinta"), line: { color: css("--superficie"), width: 2 } },
     connectgaps: false, hovertemplate: "Demanda máxima: %{y:,.0f} MW a las %{customdata}<extra></extra>",
-  }], layoutBase({ showlegend: false, yaxis: { ...layoutBase().yaxis, rangemode: "normal" }, xaxis: { ...layoutBase().xaxis, ...ejeDias(completa.length) } }), {
+  }], layoutBase({
+    showlegend: false, yaxis: { ...layoutBase().yaxis, rangemode: "normal" }, xaxis: { ...layoutBase().xaxis, ...ejeDias(completa.length) },
+    ...bandasHuecos(huecos, pxPorDia),
+  }), {
     columnas: [
       { clave: "fecha", titulo: "Fecha" },
       { clave: "demanda_max_mw", titulo: "Demanda máx. (MW)", fmt: (v) => fmt(num(v)) },
@@ -358,11 +405,11 @@ function renderDiario() {
     filas: [...filas].reverse(),
   });
 
-  const huecos = completa.filter((f) => f._vacio).length;
+  const diasVacios = completa.filter((f) => f._vacio).length;
   const primero = estado.resumen[0]?.fecha;
   document.getElementById("nota-cobertura").textContent = [
     primero ? `La serie diaria empieza el ${fechaLarga(primero)} y suma un día nuevo cada día.` : "",
-    huecos ? `El rango tiene ${dias(huecos)} sin datos.` : "",
+    diasVacios ? `El rango tiene ${dias(diasVacios)} sin datos.` : "",
   ].join(" ").trim();
 }
 
@@ -546,6 +593,7 @@ function renderMensual() {
 function renderIntercambio() {
   const ops = estado.operativo;
   const parcial = (f) => f.completo !== "si";
+  const esCalculado = (f) => Boolean(f.origen);
   const ult = ops[ops.length - 1];
   let nota = "El robot todavía no ha capturado ningún mes.";
   if (ult) {
@@ -556,13 +604,17 @@ function renderIntercambio() {
       `: importación ${fmt(num(ult.importacion_mwh))} MWh, exportación ${fmt(num(ult.exportacion_mwh))} MWh ` +
       `(saldo ${neto >= 0 ? "importador" : "exportador"} de ${fmt(Math.abs(neto))} MWh). ` +
       "Serie desde octubre de 2026; las barras claras son meses todavía en curso.";
+    const calculados = ops.filter(esCalculado);
+    if (calculados.length) {
+      nota += ` El cierre de ${calculados.map((f) => `${MESES_LARGOS[f.mes - 1]} de ${f.anio}`).join(", ")} se calculó con el acumulado anual de CENACE, porque su pestaña mensual saltó al mes siguiente sin mostrar el mes completo.`;
+    }
   }
   document.getElementById("nota-intercambio").textContent = nota;
 
   const serie = (nombre, clave, color) => ({
     type: "bar", name: nombre, x: ops.map((f) => `${MESES[f.mes - 1]} ${f.anio}`), y: ops.map((f) => num(f[clave])),
     marker: { color: css(color), opacity: ops.map((f) => (parcial(f) ? 0.55 : 1)), line: { color: css("--superficie"), width: 1.5 } },
-    customdata: ops.map((f) => (parcial(f) ? ` (hasta el día ${f.hasta_dia})` : "")),
+    customdata: ops.map((f) => (parcial(f) ? ` (hasta el día ${f.hasta_dia})` : esCalculado(f) ? " (cierre calculado)" : "")),
     hovertemplate: `${nombre}: %{y:,.0f} MWh%{customdata}<extra></extra>`,
     text: ops.length <= 12 ? ops.map((f) => fmt(num(f[clave]))) : undefined,
     textposition: "outside", cliponaxis: false, textfont: { color: css("--tinta-2") },
@@ -573,7 +625,7 @@ function renderIntercambio() {
   ] : [], layoutBase({ barmode: "group", margin: { l: 56, r: 12, t: 32, b: 40 }, xaxis: { ...layoutBase().xaxis, type: "category" } }), {
     columnas: [
       { clave: "anio", titulo: "Año" }, { clave: "mes", titulo: "Mes", fmt: (v) => MESES[v - 1] },
-      { clave: "hasta_dia", titulo: "Hasta el día", fmt: (v, f) => (parcial(f) ? v : `${v} (mes completo)`) },
+      { clave: "hasta_dia", titulo: "Hasta el día", fmt: (v, f) => (parcial(f) ? v : `${v} (mes completo${esCalculado(f) ? ", calculado" : ""})`) },
       { clave: "importacion_mwh", titulo: "Importación (MWh)", fmt: (v) => fmt(num(v)) },
       { clave: "exportacion_mwh", titulo: "Exportación (MWh)", fmt: (v) => fmt(num(v)) },
       { clave: "_neto", titulo: "Neto (MWh)", fmt: (_, f) => fmt(num(f.importacion_mwh) - num(f.exportacion_mwh)) },
@@ -650,6 +702,13 @@ function tileEstado(ind) {
   return nodo;
 }
 
+// Con menos de 7 días, el mes en curso es poco representativo: se usa el mes anterior.
+function mesTermica() {
+  const ops = estado.operativo;
+  const ultimo = ops[ops.length - 1];
+  return ultimo && +ultimo.hasta_dia < 7 && ops.length > 1 ? ops[ops.length - 2] : ultimo;
+}
+
 function indicadoresAlerta() {
   const hidro = estado.hidro;
   const porFecha = new Map(hidro.map((f) => [f.fecha, f]));
@@ -719,8 +778,8 @@ function indicadoresAlerta() {
   out.caudal = caudal("mazar_caudal_m3s", "Caudal de entrada a Mazar");
   out.coca = caudal("coca_caudal_m3s", "Caudal del río Coca");
 
-  // 5. Dependencia térmica del mes en curso frente al mismo mes de otros años.
-  const op = estado.operativo[estado.operativo.length - 1];
+  // 5. Dependencia térmica del mes frente al mismo mes de otros años.
+  const op = mesTermica();
   if (op) {
     const v = num(op.termica_mwh) / num(op.produccion_total_mwh);
     const refs = anios.filter((a) => a < op.anio).map((a) => {
@@ -829,19 +888,21 @@ function renderAlerta() {
 
   // Participación térmica mensual oficial + mes en curso; franja de la crisis 2023–2024.
   const meses = estado.mensual.filter((m) => +m.anio >= 2019);
-  const op = estado.operativo[estado.operativo.length - 1];
+  const ops = estado.operativo;
+  const textoMes = (o) => `${MESES[o.mes - 1]} ${o.anio}${o.completo === "si" ? "" : ` (al día ${o.hasta_dia})`}`;
   const trazasTermica = [{
     type: "scatter", mode: "lines", name: "Mensual oficial", x: meses.map((m) => `${claveMes(m)}-01`),
     y: meses.map((m) => (100 * num(m.termica_gwh)) / num(m.total_gwh)), line: { color: css("--serie-termica"), width: 2 },
     hovertemplate: "%{x|%b %Y}: %{y:,.1f} %<extra></extra>",
   }];
-  if (op) {
+  if (ops.length) {
+    // Meses capturados por el robot (la serie oficial llega con varios meses de rezago).
     trazasTermica.push({
-      type: "scatter", mode: "markers+text", name: "Mes en curso", x: [`${op.anio}-${String(op.mes).padStart(2, "0")}-01`],
-      y: [(100 * num(op.termica_mwh)) / num(op.produccion_total_mwh)],
+      type: "scatter", mode: "markers+text", name: "Robot (desde oct-2026)", x: ops.map((o) => `${o.anio}-${String(o.mes).padStart(2, "0")}-01`),
+      y: ops.map((o) => (100 * num(o.termica_mwh)) / num(o.produccion_total_mwh)),
       marker: { size: 10, color: css("--tinta"), line: { color: css("--superficie"), width: 2 } },
-      text: [`${MESES[op.mes - 1]} ${op.anio} (al día ${op.hasta_dia})`], textposition: "top left", textfont: { color: css("--tinta-2"), size: 11 },
-      hovertemplate: `${MESES[op.mes - 1]} ${op.anio}, al día ${op.hasta_dia}: %{y:,.1f} %<extra></extra>`,
+      text: ops.map((o, i) => (i === ops.length - 1 ? textoMes(o) : "")), textposition: "top left", textfont: { color: css("--tinta-2"), size: 11 },
+      customdata: ops.map(textoMes), hovertemplate: "%{customdata}: %{y:,.1f} %<extra></extra>",
     });
   }
   dibujar("g-termica", trazasTermica, layoutBase({
@@ -1003,6 +1064,19 @@ function iniciarControles() {
 
 // ---------------------------------------------------------------- arranque
 
+// Última vez que el robot leyó CENACE, aunque no haya encontrado datos nuevos. Si la API de GitHub
+// no responde (tiene límite por IP), la página sigue igual sin ese dato.
+async function mostrarUltimaRevision(usuario, repo) {
+  try {
+    const r = await fetch(`https://api.github.com/repos/${usuario}/${repo}/actions/workflows/robot.yml/runs?status=success&per_page=10`);
+    if (!r.ok) return;
+    const corrida = (await r.json()).workflow_runs.find((c) => c.event !== "push");
+    if (!corrida) return;
+    document.getElementById("meta-revision").textContent = "Última revisión del robot: " +
+      new Intl.DateTimeFormat("es-EC", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Guayaquil" }).format(new Date(corrida.created_at));
+  } catch { /* dato opcional */ }
+}
+
 async function cargar() {
   registrarLocale();
   try {
@@ -1011,10 +1085,10 @@ async function cargar() {
   } catch { /* sin almacenamiento */ }
 
   const texto = (ruta) => fetch(ruta, { cache: "no-cache" }).then((r) => (r.ok ? r.text() : ""));
-  const [resumen, curva, detalle, mensual, anual, operativo, hidro, meta] = await Promise.all([
+  const [resumen, curva, detalle, mensual, anual, operativo, hidro, huecos, meta] = await Promise.all([
     texto("data/diario_resumen.csv"), texto("data/diario_curva.csv"), texto("data/diario_detalle.csv"),
     texto("data/mensual_tecnologia.csv"), texto("data/anual_produccion.csv"), texto("data/mensual_operativo.csv"),
-    texto("data/hidrologia.csv"), texto("data/meta.json"),
+    texto("data/hidrologia.csv"), texto("data/diario_huecos.csv"), texto("data/meta.json"),
   ]);
   Object.assign(estado, {
     resumen: resumen ? parseCSV(resumen).sort((a, b) => a.fecha.localeCompare(b.fecha)) : [],
@@ -1022,12 +1096,13 @@ async function cargar() {
     mensual: mensual ? parseCSV(mensual) : [], anual: anual ? parseCSV(anual) : [],
     operativo: operativo ? parseCSV(operativo) : [],
     hidro: hidro ? parseCSV(hidro).sort((a, b) => a.fecha.localeCompare(b.fecha)) : [],
+    huecos: huecos ? parseCSV(huecos) : [],
     meta: meta ? JSON.parse(meta) : null,
   });
 
   const ult = estado.resumen[estado.resumen.length - 1];
   document.getElementById("meta-cobertura").textContent = ult
-    ? `${dias(estado.resumen.length)} · último: ${fechaLarga(ult.fecha)}` : "Sin datos diarios todavía";
+    ? `${dias(estado.resumen.length)} · último: ${fechaLarga(ult.fecha)} (hace ${dias(rezagoDias(ult.fecha))})` : "Sin datos diarios todavía";
   if (estado.meta?.actualizado_utc) {
     document.getElementById("meta-actualizado").textContent = "Base actualizada: " +
       new Intl.DateTimeFormat("es-EC", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Guayaquil" })
@@ -1035,7 +1110,10 @@ async function cargar() {
   }
   const m = location.hostname.match(/^([^.]+)\.github\.io$/);
   const repo = location.pathname.split("/").filter(Boolean)[0];
-  if (m && repo) document.getElementById("enlace-repo").href = `https://github.com/${m[1]}/${repo}`;
+  if (m && repo) {
+    document.getElementById("enlace-repo").href = `https://github.com/${m[1]}/${repo}`;
+    mostrarUltimaRevision(m[1], repo);
+  }
 
   estado.dia = ult?.fecha;
   fijarRango("90");

@@ -13,7 +13,8 @@ día disponible; este repositorio lo guarda día a día.
 |---|---|
 | `data/diario_resumen.csv` | Producción por fuente, importación y exportación (MWh); demanda máxima y mínima (MW). Un registro por día, desde el 25-oct-2026. |
 | `data/diario_curva.csv` | Generación por fuente y demanda nacional cada 30 minutos (MW). |
-| `data/diario_detalle.csv` | Producción por central hidroeléctrica y por tipo térmico (MWh). |
+| `data/diario_detalle.csv` | Producción por central hidroeléctrica y por tipo térmico (MWh). Una central que no generó ese día no aparece. |
+| `data/diario_huecos.csv` | Días que CENACE no publicó en su pestaña diaria: suma de esos días (MWh), calculada con la diferencia de su acumulado anual. |
 | `data/mensual_operativo.csv` | Acumulado de cada mes, incluida importación y exportación (MWh), desde oct-2026. `hasta_dia` indica hasta qué día va el acumulado. |
 | `data/mensual_tecnologia.csv` | Serie oficial de energía neta por tecnología desde enero de 2010 (GWh). |
 | `data/anual_produccion.csv` | Producción anual oficial (GWh). |
@@ -27,8 +28,9 @@ Los datos diarios son preliminares del SCADA y CENACE puede revisarlos.
 
 ## Actualización
 
-Un workflow de GitHub Actions corre `robot/cenace.py` tres veces al día, guarda los
-datos nuevos en `data/` y vuelve a publicar el dashboard (`site/`).
+Un workflow de GitHub Actions corre `robot/cenace.py` cada 2 horas y, si hay datos nuevos,
+los guarda en `data/` y vuelve a publicar el dashboard (`site/`). El dashboard avanza cuando
+CENACE publica: normalmente con 2 o 3 días de rezago, a veces más (por ejemplo, en feriados).
 
 Para correrlo localmente (Python 3.10+, sin dependencias):
 

@@ -63,7 +63,7 @@ COLUMNAS_CURVA = [
     "exportacion_mw", "produccion_total_mw", "demanda_nacional_mw",
 ]
 # Campos que no cuentan como "cambio de datos" al comparar una nueva captura.
-CAMPOS_TRAZABILIDAD = {"fuente", "capturado_utc"}
+CAMPOS_TRAZABILIDAD = {"fuente", "capturado_utc", "origen"}
 
 # Etiquetas de la página (sin tildes, en mayúsculas) -> clave interna.
 COMPONENTES = {
@@ -90,8 +90,10 @@ COMPONENTES_PRODUCCION = ["produccion_total", "hidraulica", "termica", "no_conve
 COLUMNAS_HIDROLOGIA = ["fecha", "mazar_cota_msnm", "mazar_caudal_m3s", "coca_caudal_m3s"]
 COLUMNAS_MENSUAL_OPERATIVO = [
     "anio", "mes", "hasta_dia", "completo", *[f"{k}_mwh" for k in COMPONENTES_PRODUCCION],
-    "demanda_max_mw", "fecha_demanda_max", "capturado_utc",
+    "demanda_max_mw", "fecha_demanda_max", "capturado_utc", "origen",
 ]
+COLUMNAS_HUECOS = ["desde", "hasta", "dias", *[f"{k}_mwh" for k in COMPONENTES_PRODUCCION], "metodo"]
+METODO_ACUMULADO = "diferencia del acumulado anual"
 
 
 class ErrorFormato(Exception):
@@ -312,6 +314,20 @@ def extraer_mensual(pagina: str) -> dict:
     return fila
 
 
+def _acumulado_anual(pagina: str) -> dict:
+    """Acumulado del año según la pestaña anual: fecha hasta la que llega y componentes en MWh."""
+    anual = _pestana(pagina, "ANUAL")
+    texto = _normalizar(re.sub(r"<[^>]+>", " ", anual[:4000])).lower()
+    m = re.search(r"(\d{4}) \(hasta el dia (\d{1,2}) de ([a-z]+)\)", texto)
+    if not m or m.group(3) not in MESES:
+        raise ErrorFormato("no se encontró el período de la pestaña anual")
+    produccion = _produccion(anual, m.group(0))  # la pestaña anual está en GWh
+    return {
+        "fecha": dt.date(int(m.group(1)), MESES[m.group(3)], int(m.group(2))),
+        **{k: produccion.get(k, 0.0) * 1000 for k in COMPONENTES_PRODUCCION},
+    }
+
+
 # --------------------------------------------------------------------------- almacenamiento
 
 def _leer_csv(ruta: Path) -> tuple[list[str], list[dict]]:
@@ -381,6 +397,68 @@ def guardar_mes(fila: dict, datos: Path = DATOS) -> str:
     filas.sort(key=lambda f: (int(f["anio"]), int(f["mes"])))
     _escribir_csv(ruta, columnas, filas)
     return "actualizado" if previa else "nuevo"
+
+
+def _pagina_guardada(fecha: str, datos: Path) -> str | None:
+    ruta = datos / "raw" / fecha[:4] / f"{fecha}.html.gz"
+    if not ruta.exists():
+        return None
+    with gzip.open(ruta, "rt", encoding="utf-8") as f:
+        return f.read()
+
+
+def actualizar_huecos(datos: Path = DATOS) -> bool:
+    """Reconstruye lo que CENACE no publicó cuando su pestaña diaria salta fechas.
+
+    Los días que se saltó sí están en su acumulado anual: la diferencia entre dos capturas, menos el
+    último día, es la suma de los días faltantes (no se pueden separar entre sí ni por central). Si
+    el salto cruza de mes, la misma cuenta permite cerrar el mes anterior.
+    """
+    _, resumen = _leer_csv(datos / "diario_resumen.csv")
+    por_fecha = {r["fecha"]: r for r in resumen}
+    fechas = sorted(por_fecha)
+    columnas_mes, meses = _leer_csv(datos / "mensual_operativo.csv")
+    limpio = lambda v: _fmt(0.0 if abs(v) < 0.005 else float(v))  # noqa: E731
+    huecos = []
+    for previa, actual in zip(fechas, fechas[1:]):
+        p, d = dt.date.fromisoformat(previa), dt.date.fromisoformat(actual)
+        faltan = (d - p).days - 1
+        if faltan < 1:
+            continue
+        html_p, html_d = _pagina_guardada(previa, datos), _pagina_guardada(actual, datos)
+        try:
+            if html_p is None or html_d is None:
+                raise ErrorFormato("falta la copia de la página de uno de los días")
+            if p.year != d.year:
+                raise ErrorFormato("el salto cruza de año y el acumulado anual se reinicia")
+            acum_p, acum_d = _acumulado_anual(html_p), _acumulado_anual(html_d)
+            if acum_p["fecha"] != p or acum_d["fecha"] != d:
+                raise ErrorFormato("el acumulado anual no llega a la misma fecha que la pestaña diaria")
+        except ErrorFormato as e:
+            print(f"::warning::No se pudieron calcular los días entre {previa} y {actual}: {e}")
+            continue
+        diferencia = {k: acum_d[k] - acum_p[k] for k in COMPONENTES_PRODUCCION}
+        huecos.append({
+            "desde": (p + dt.timedelta(days=1)).isoformat(), "hasta": (d - dt.timedelta(days=1)).isoformat(), "dias": faltan,
+            **{f"{k}_mwh": limpio(diferencia[k] - float(por_fecha[actual].get(f"{k}_mwh") or 0)) for k in COMPONENTES_PRODUCCION},
+            "metodo": METODO_ACUMULADO,
+        })
+        # Salto al mes siguiente: lo que no es del mes nuevo completa el mes anterior.
+        if d.month != p.month + 1:
+            continue
+        fila = next((m for m in meses if (int(m["anio"]), int(m["mes"])) == (p.year, p.month)), None)
+        if fila is None or (fila.get("completo") == "si" and fila.get("origen") != METODO_ACUMULADO):
+            continue
+        mes_p, mes_d = extraer_mensual(html_p), extraer_mensual(html_d)
+        for k in COMPONENTES_PRODUCCION:
+            fila[f"{k}_mwh"] = limpio(float(mes_p[f"{k}_mwh"]) + diferencia[k] - float(mes_d[f"{k}_mwh"]))
+        fila.update(hasta_dia=str(calendar.monthrange(p.year, p.month)[1]), completo="si", origen=METODO_ACUMULADO)
+
+    cambios = _escribir_si_cambia(datos / "diario_huecos.csv", COLUMNAS_HUECOS, huecos)
+    if meses:
+        columnas = list(dict.fromkeys(COLUMNAS_MENSUAL_OPERATIVO + columnas_mes))
+        cambios |= _escribir_si_cambia(datos / "mensual_operativo.csv", columnas, meses)
+    return cambios
 
 
 # --------------------------------------------------------------------------- serie mensual oficial
@@ -553,6 +631,13 @@ def main(argv: list[str] | None = None) -> int:
           f"{len(dia['detalle'])} centrales/grupos, {len(dia['curva'])} puntos de curva")
     cambios = estado != "sin cambios"
 
+    # Diagnóstico: distingue una página vieja (también el tiempo real) de una pestaña diaria atrasada.
+    tiempo_real = re.search(r"<span>([^<]+)</span>", _pestanas(html)[0])
+    print(f"Página de CENACE: tiempo real «{tiempo_real.group(1) if tiempo_real else '?'}», pestaña diaria {dia['fecha']}")
+    hoy_ecuador = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=5)).date()
+    if (hoy_ecuador - dia["fecha"]).days > 4:
+        print(f"::warning::La pestaña diaria de CENACE sigue en {dia['fecha']} ({(hoy_ecuador - dia['fecha']).days} días de atraso).")
+
     # El acumulado del mes es complementario: si falla se avisa en GitHub pero el día se guarda igual.
     try:
         mes = extraer_mensual(html)
@@ -562,6 +647,13 @@ def main(argv: list[str] | None = None) -> int:
         cambios |= estado_mes != "sin cambios"
     except ErrorFormato as e:
         print(f"::warning::No se pudo leer la pestaña mensual de CENACE: {e}")
+
+    try:
+        if actualizar_huecos():
+            print("Días sin publicar y cierres de mes: actualizados")
+            cambios = True
+    except Exception as e:
+        print(f"::warning::No se pudieron calcular los días sin publicar: {e}")
 
     if not args.sin_mensual and not args.archivo:
         try:

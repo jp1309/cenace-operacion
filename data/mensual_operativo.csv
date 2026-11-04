@@ -1,3 +1,3 @@
-﻿anio,mes,hasta_dia,completo,produccion_total_mwh,hidraulica_mwh,termica_mwh,no_convencional_mwh,importacion_mwh,exportacion_mwh,demanda_max_mw,fecha_demanda_max,capturado_utc
-2026,10,29,no,2800149.305,2013902.4225,764868.2,18005.3225,3373.36,2450.87,5268.38,2026-10-06,2026-10-30T21:29:04Z
-2026,11,1,no,87614.8975,61262.715,25692.3825,562.04,97.76,93.61,4428.62,2026-11-01,2026-11-04T16:22:26Z
+﻿anio,mes,hasta_dia,completo,produccion_total_mwh,hidraulica_mwh,termica_mwh,no_convencional_mwh,importacion_mwh,exportacion_mwh,demanda_max_mw,fecha_demanda_max,capturado_utc,origen
+2026,10,31,si,2989561.2675,2149180.1275,817660.265,19146.305,3574.57,2565.55,5268.38,2026-10-06,2026-10-30T21:29:04Z,diferencia del acumulado anual
+2026,11,1,no,87614.8975,61262.715,25692.3825,562.04,97.76,93.61,4428.62,2026-11-01,2026-11-04T16:22:26Z,
