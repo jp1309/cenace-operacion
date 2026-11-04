@@ -88,6 +88,9 @@ SERIES_CURVA = {
 GRUPOS_DETALLE = ["hidraulica", "termica_y_otras"]
 COMPONENTES_PRODUCCION = ["produccion_total", "hidraulica", "termica", "no_convencional", "importacion", "exportacion"]
 COLUMNAS_HIDROLOGIA = ["fecha", "mazar_cota_msnm", "mazar_caudal_m3s", "coca_caudal_m3s"]
+# Capturas de tiempo real: desde esta hora de la curva ya incluyen el pico de la noche que empieza.
+# Antes de eso aportan poco y solo llenarían el historial con commits.
+HORA_MINIMA_CAPTURA = "18:00"
 COLUMNAS_MENSUAL_OPERATIVO = [
     "anio", "mes", "hasta_dia", "completo", *[f"{k}_mwh" for k in COMPONENTES_PRODUCCION],
     "demanda_max_mw", "fecha_demanda_max", "capturado_utc", "origen",
@@ -177,7 +180,7 @@ def _pestana(pagina: str, palabra: str) -> str:
     return segmento
 
 
-def _produccion(segmento: str, referencia: str) -> dict[str, float]:
+def _produccion(segmento: str, referencia: str, avisar: bool = True) -> dict[str, float]:
     """Producción total y componentes de una pestaña (en la unidad que muestra la página)."""
     # Cajas de resumen (valores redondeados que muestra la página).
     cajas = {}
@@ -200,7 +203,7 @@ def _produccion(segmento: str, referencia: str) -> dict[str, float]:
     suma = sum(componentes.get(k, 0.0) for k in ("hidraulica", "termica", "no_convencional", "importacion"))
     if abs(suma - total) <= 1.0:
         total = suma
-    else:
+    elif avisar:
         print(f"  aviso {referencia}: la suma de componentes ({suma:.1f}) no cuadra con el total ({total:.0f})", file=sys.stderr)
     return {"produccion_total": total, **componentes}
 
@@ -228,11 +231,37 @@ def extraer_diario(pagina: str, fuente: str = "cenace") -> dict:
 
     Devuelve {"fecha", "resumen": dict, "detalle": [dict], "curva": [dict]}.
     """
-    diaria = _pestana(pagina, "DIARIA")
-    fecha = _fecha_pestana(diaria)
-    produccion = _produccion(diaria, str(fecha))
+    return _extraer_dia(_pestana(pagina, "DIARIA"), fuente)
 
-    graficos = _graficos(diaria)
+
+def extraer_tiempo_real(pagina: str) -> dict:
+    """Extrae la pestaña de producción en tiempo real: el día en curso hasta la última hora con datos.
+
+    Devuelve lo mismo que extraer_diario más "hasta_hora". La pestaña no trae "Otras Hidro", que se
+    calcula como el resto de la hidráulica, igual que en la pestaña diaria.
+    """
+    dia = _extraer_dia(_pestana(pagina, "TIEMPO REAL"), "tiempo_real", avisar=False)
+    # Las horas que aún no ocurren vienen vacías.
+    dia["curva"] = [f for f in dia["curva"] if f.get("produccion_total_mw")]
+    if not dia["curva"]:
+        raise ErrorFormato("la pestaña de tiempo real no tiene datos en la curva")
+    dia["hasta_hora"] = dia["curva"][-1]["hora"]
+    dia["resumen"]["hasta_hora"] = dia["hasta_hora"]
+
+    fecha = dia["fecha"].isoformat()
+    nombradas = [d for d in dia["detalle"] if d["grupo"] == "hidraulica"]
+    if not any(d["nombre"] == "Otras Hidro" for d in nombradas):
+        resto = float(dia["resumen"].get("hidraulica_mwh") or 0) - sum(float(d["mwh"]) for d in nombradas)
+        if resto > 0:
+            dia["detalle"].append({"fecha": fecha, "grupo": "hidraulica", "nombre": "Otras Hidro", "mwh": _fmt(float(round(resto)))})
+    return dia
+
+
+def _extraer_dia(segmento: str, fuente: str, avisar: bool = True) -> dict:
+    fecha = _fecha_pestana(segmento)
+    produccion = _produccion(segmento, str(fecha), avisar=avisar)
+
+    graficos = _graficos(segmento)
     barras = [g for g in graficos if g and all(t.get("type") == "bar" for t in g)]
     curva = next((g for g in graficos if g and any(t.get("stackgroup") or t.get("mode") == "lines" for t in g)), None)
 
@@ -261,7 +290,7 @@ def extraer_diario(pagina: str, fuente: str = "cenace") -> dict:
             fila = {"fecha": fecha.isoformat(), "hora": hora}
             for columna, valores in series.items():
                 v = valores[i] if i < len(valores) else None
-                fila[columna] = _fmt(float(v)) if v is not None else ""
+                fila[columna] = _fmt(float(v)) if v is not None and v == v else ""  # v != v: NaN
             filas_curva.append(fila)
 
     resumen = {
@@ -381,6 +410,32 @@ def guardar_dia(dia: dict, html: str | None = None, sobrescribir: bool = True, d
         with gzip.GzipFile(crudo, "wb", mtime=0) as f:
             f.write(html.encode("utf-8"))
     return "actualizado" if existe else "nuevo"
+
+
+def guardar_tiempo_real(dia: dict, datos: Path = DATOS, desde_hora: str = HORA_MINIMA_CAPTURA) -> str:
+    """Guarda en tiempo_real_*.csv la captura más completa de cada día.
+
+    Es un dato preliminar y parcial, para los días que CENACE luego se salte en su pestaña diaria.
+    Devuelve 'temprano', 'sin cambios', 'nuevo' o 'actualizado'.
+    """
+    if dia["hasta_hora"] < desde_hora:
+        return "temprano"
+    fecha = dia["fecha"].isoformat()
+    resumen_previo = _leer_csv(datos / "tiempo_real_resumen.csv")[1]
+    previa = next((f for f in resumen_previo if f["fecha"] == fecha), None)
+    if previa and previa["hasta_hora"] >= dia["hasta_hora"]:
+        return "sin cambios"
+    for nombre, base, nuevas in (
+        ("tiempo_real_resumen.csv", ["fecha", "hasta_hora", *COLUMNAS_RESUMEN[1:]], [dia["resumen"]]),
+        ("tiempo_real_detalle.csv", COLUMNAS_DETALLE, dia["detalle"]),
+        ("tiempo_real_curva.csv", COLUMNAS_CURVA, dia["curva"]),
+    ):
+        columnas, filas = _leer_csv(datos / nombre)
+        columnas = list(dict.fromkeys(base + columnas + [c for f in nuevas for c in f]))
+        filas = [f for f in filas if f.get("fecha") != fecha] + nuevas
+        filas.sort(key=lambda f: (f.get("fecha", ""), f.get("hora", ""), f.get("grupo", "")))
+        _escribir_csv(datos / nombre, columnas, filas)
+    return "actualizado" if previa else "nuevo"
 
 
 def guardar_mes(fila: dict, datos: Path = DATOS) -> str:
@@ -637,6 +692,14 @@ def main(argv: list[str] | None = None) -> int:
     hoy_ecuador = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=5)).date()
     if (hoy_ecuador - dia["fecha"]).days > 4:
         print(f"::warning::La pestaña diaria de CENACE sigue en {dia['fecha']} ({(hoy_ecuador - dia['fecha']).days} días de atraso).")
+
+    # Captura de tiempo real: por sí sola no cuenta como cambio, porque el sitio solo la muestra
+    # cuando CENACE se salta un día, y eso se sabe al llegar un día oficial posterior.
+    try:
+        captura = extraer_tiempo_real(html)
+        print(f"Tiempo real {captura['fecha']} hasta las {captura['hasta_hora']}: {guardar_tiempo_real(captura)}")
+    except ErrorFormato as e:
+        print(f"::warning::No se pudo leer la pestaña de tiempo real de CENACE: {e}")
 
     # El acumulado del mes es complementario: si falla se avisa en GitHub pero el día se guarda igual.
     try:

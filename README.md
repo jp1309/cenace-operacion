@@ -15,6 +15,7 @@ día disponible; este repositorio lo guarda día a día.
 | `data/diario_curva.csv` | Generación por fuente y demanda nacional cada 30 minutos (MW). |
 | `data/diario_detalle.csv` | Producción por central hidroeléctrica y por tipo térmico (MWh). Una central que no generó ese día no aparece. |
 | `data/diario_huecos.csv` | Días que CENACE no publicó en su pestaña diaria: suma de esos días (MWh), calculada con la diferencia de su acumulado anual. |
+| `data/tiempo_real_*.csv` | Última captura de la pestaña de tiempo real de cada día (resumen, curva y detalle). Datos preliminares y parciales, respaldo para los días que CENACE no publica; `hasta_hora` indica hasta dónde llegan. |
 | `data/mensual_operativo.csv` | Acumulado de cada mes, incluida importación y exportación (MWh), desde oct-2026. `hasta_dia` indica hasta qué día va el acumulado. |
 | `data/mensual_tecnologia.csv` | Serie oficial de energía neta por tecnología desde enero de 2010 (GWh). |
 | `data/anual_produccion.csv` | Producción anual oficial (GWh). |

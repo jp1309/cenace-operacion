@@ -149,6 +149,43 @@ class TestHuecos(unittest.TestCase):
             self.assertEqual(huecos, [])
 
 
+class TestTiempoReal(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Captura real del 30-oct a las 16:00, guardada junto con el 29-oct.
+        with gzip.open(RAIZ / "tests" / "fixtures" / "paginas" / "2026-10-29.html.gz", "rt", encoding="utf-8") as f:
+            cls.captura = cenace.extraer_tiempo_real(f.read())
+
+    def test_fecha_y_hora(self):
+        self.assertEqual(self.captura["fecha"], dt.date(2026, 10, 30))
+        self.assertEqual(self.captura["hasta_hora"], "16:00")
+        self.assertEqual(self.captura["curva"][-1]["hora"], "16:00")
+
+    def test_curva_sin_horas_futuras_ni_nan(self):
+        self.assertEqual(len(self.captura["curva"]), 33)  # 00:00 a 16:00 cada 30 minutos
+        for fila in self.captura["curva"]:
+            self.assertNotIn("nan", [str(v).lower() for v in fila.values()])
+
+    def test_otras_hidro_es_el_resto_de_la_hidraulica(self):
+        hidro = [d for d in self.captura["detalle"] if d["grupo"] == "hidraulica"]
+        self.assertIn("Otras Hidro", [d["nombre"] for d in hidro])
+        self.assertAlmostEqual(sum(float(d["mwh"]) for d in hidro), float(self.captura["resumen"]["hidraulica_mwh"]), delta=1)
+
+    def test_guarda_solo_la_captura_mas_completa(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            datos = Path(tmp)
+            self.assertEqual(cenace.guardar_tiempo_real(self.captura, datos=datos), "temprano")  # antes de las 18:00
+            self.assertFalse((datos / "tiempo_real_resumen.csv").exists())
+            self.assertEqual(cenace.guardar_tiempo_real(self.captura, datos=datos, desde_hora="12:00"), "nuevo")
+            self.assertEqual(cenace.guardar_tiempo_real(self.captura, datos=datos, desde_hora="12:00"), "sin cambios")
+            mas_tarde = {**self.captura, "hasta_hora": "22:00", "resumen": {**self.captura["resumen"], "hasta_hora": "22:00"}}
+            self.assertEqual(cenace.guardar_tiempo_real(mas_tarde, datos=datos, desde_hora="12:00"), "actualizado")
+            antes = {**self.captura, "hasta_hora": "20:00", "resumen": {**self.captura["resumen"], "hasta_hora": "20:00"}}
+            self.assertEqual(cenace.guardar_tiempo_real(antes, datos=datos, desde_hora="12:00"), "sin cambios")
+            _, filas = cenace._leer_csv(datos / "tiempo_real_resumen.csv")
+            self.assertEqual([f["hasta_hora"] for f in filas], ["22:00"])
+
+
 class TestHidrologia(unittest.TestCase):
     HIDRO = (
         "date,year,doy365,mmdd,series,metric,value,is_placeholder\n"

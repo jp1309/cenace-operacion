@@ -1,0 +1,3 @@
+﻿fecha,hasta_hora,produccion_total_mwh,hidraulica_mwh,termica_mwh,no_convencional_mwh,importacion_mwh,exportacion_mwh,demanda_max_mw,hora_demanda_max,demanda_min_mw,hora_demanda_min,fuente,capturado_utc
+2026-10-30,16:00,64747,44816.8011,19232.6099,560.4527,24.3485,57.4205,4447.1954,15:30,3343.8821,06:30,tiempo_real,2026-11-04T17:04:00Z
+2026-11-04,12:00,47139,31886.116,14833.566,196.7946,168.2795,97.1625,4638.1063,12:00,3265.4028,06:30,tiempo_real,2026-11-04T17:04:01Z

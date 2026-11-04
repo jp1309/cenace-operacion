@@ -47,14 +47,22 @@ jobs:
             echo "cambios=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          ultimo=$(python -c 'import json; print(json.load(open("data/meta.json"))["diario"]["hasta"])')
+          # Las capturas de tiempo real se guardan, pero por sí solas no cambian lo que muestra el sitio.
+          if [ -n "$(git status --porcelain data | grep -v 'data/tiempo_real_')" ]; then
+            ultimo=$(python -c 'import json; print(json.load(open("data/meta.json"))["diario"]["hasta"])')
+            mensaje="Datos CENACE al ${ultimo}"
+            cambios=true
+          else
+            mensaje="Captura de tiempo real de CENACE"
+            cambios=false
+          fi
           git config user.name "robot-cenace"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data
-          git commit -m "Datos CENACE al ${ultimo}"
+          git commit -m "${mensaje}"
           git pull --rebase origin main
           git push
-          echo "cambios=true" >> "$GITHUB_OUTPUT"
+          echo "cambios=${cambios}" >> "$GITHUB_OUTPUT"
 
   publicar:
     needs: descargar

@@ -68,6 +68,7 @@
         <button type="button" id="dia-siguiente" class="boton-fantasma" aria-label="Día siguiente">›</button>
         <a id="descarga-dia" class="enlace-descarga" download>Descargar curva del día (CSV)</a>
       </div>
+      <p class="aviso" id="aviso-dia" hidden></p>
       <div class="tiles" id="tiles-dia"></div>
       <article class="tarjeta">
         <header><h2>Curva de generación y demanda <span class="unidad">MW, cada 30 min</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-curva">Ver tabla</button></header>
@@ -170,6 +171,7 @@
           <li><a href="data/mensual_tecnologia.csv" download>mensual_tecnologia.csv</a> — serie oficial mensual por tecnología desde 2010 (GWh).</li>
           <li><a href="data/anual_produccion.csv" download>anual_produccion.csv</a> — producción anual oficial (GWh).</li>
           <li><a href="data/diario_huecos.csv" download>diario_huecos.csv</a> — días que CENACE no publicó en su pestaña diaria: la suma de esos días, calculada con la diferencia de su acumulado anual (no se puede separar por día ni por central).</li>
+          <li><a href="data/tiempo_real_resumen.csv" download>tiempo_real_resumen.csv</a>, <a href="data/tiempo_real_curva.csv" download>tiempo_real_curva.csv</a> y <a href="data/tiempo_real_detalle.csv" download>tiempo_real_detalle.csv</a> — última captura de la pestaña de tiempo real de cada día. Son datos preliminares y parciales: <code>hasta_hora</code> indica hasta dónde llega la captura.</li>
           <li><a href="data/hidrologia.csv" download>hidrologia.csv</a> — cota (msnm) y caudal de entrada (m³/s) del embalse de Mazar desde 2020 y caudal del río Coca desde 2024, tomados de CELEC.</li>
           <li><a href="data/mensual_operativo.csv" download>mensual_operativo.csv</a> — acumulado de cada mes desde octubre de 2026: producción por fuente, importación y exportación (MWh) y demanda máxima; <code>hasta_dia</code> indica hasta qué día va el acumulado.</li>
         </ul>

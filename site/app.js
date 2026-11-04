@@ -3,6 +3,7 @@
 
 const estado = {
   resumen: [], curva: [], detalle: [], mensual: [], anual: [], operativo: [], hidro: [], huecos: [], meta: null,
+  tr: { resumen: [], curva: [], detalle: [] }, // capturas de tiempo real
   rango: { desde: null, hasta: null }, dia: null, periodo: { desde: null, hasta: null },
   drill: { fuente: "", central: "" },
   vista: "diario", tablas: {}, modoTabla: {},
@@ -208,6 +209,14 @@ function seriesDiarias(filas) {
   return series.filter((s) => [...s.valores.values()].some((v) => v > 0));
 }
 
+// Días que CENACE se saltó en su pestaña diaria y de los que hay captura de su tiempo real.
+function diasPreliminares() {
+  const oficiales = estado.resumen.map((f) => f.fecha);
+  const ultimo = oficiales[oficiales.length - 1];
+  return estado.tr.resumen.map((f) => f.fecha).filter((f) => ultimo && f < ultimo && !oficiales.includes(f));
+}
+const diasConsulta = () => [...estado.resumen.map((f) => f.fecha), ...diasPreliminares()].sort();
+
 // Días que CENACE no publicó (saltos de su pestaña diaria) que tocan el rango elegido.
 function huecosEnRango(desde, hasta) {
   return estado.huecos.filter((h) => h.desde <= hasta && h.hasta >= desde);
@@ -240,6 +249,10 @@ function avisoDiario(huecos) {
     const periodo = h.desde === h.hasta ? `el ${fechaLarga(h.desde)}` : `del ${fechaLarga(h.desde)} al ${fechaLarga(h.hasta)}`;
     partes.push(`CENACE no publicó el detalle ${periodo}. Según su acumulado anual, ${+h.dias === 1 ? "ese día sumó" : `esos ${h.dias} días sumaron`} ` +
       `${fmt(num(h.produccion_total_mwh))} MWh: hidráulica ${fmt(num(h.hidraulica_mwh))}, térmica ${fmt(num(h.termica_mwh))}, no convencional ${fmt(num(h.no_convencional_mwh))} e importación ${fmt(num(h.importacion_mwh))}.`);
+    const conCaptura = diasPreliminares().filter((f) => f >= h.desde && f <= h.hasta);
+    if (conCaptura.length) {
+      partes.push(`En "Consulta por día" hay una captura preliminar de ${conCaptura.map(fechaLarga).join(" y del ")}.`);
+    }
   }
   const nodo = document.getElementById("aviso-diario");
   nodo.textContent = partes.join(" ");
@@ -417,11 +430,22 @@ function renderDiario() {
 
 function renderDia() {
   const fecha = estado.dia;
-  const r = estado.resumen.find((f) => f.fecha === fecha);
+  const preliminar = diasPreliminares().includes(fecha);
+  const base = preliminar ? estado.tr : estado;
+  const r = base.resumen.find((f) => f.fecha === fecha);
   if (!r) return;
   const total = num(r.produccion_total_mwh);
+
+  const aviso = document.getElementById("aviso-dia");
+  aviso.hidden = !preliminar;
+  if (preliminar) {
+    const h = estado.huecos.find((x) => x.desde <= fecha && x.hasta >= fecha);
+    aviso.textContent = `Dato preliminar: CENACE no publicó este día en su pestaña diaria. Es la última captura de su tiempo real, hasta las ${r.hasta_hora}: el día está incompleto y no se suma a la serie diaria.` +
+      (!h ? "" : +h.dias === 1 ? ` Según su acumulado anual, el día completo sumó ${fmt(num(h.produccion_total_mwh))} MWh.`
+        : ` Según su acumulado anual, del ${fechaLarga(h.desde)} al ${fechaLarga(h.hasta)} se sumaron ${fmt(num(h.produccion_total_mwh))} MWh en total.`);
+  }
   document.getElementById("tiles-dia").replaceChildren(
-    tile("Producción total", fmt(total), "MWh", fechaLarga(fecha)),
+    tile(preliminar ? `Producción hasta las ${r.hasta_hora}` : "Producción total", fmt(total), "MWh", fechaLarga(fecha)),
     tile("Hidráulica", pct(num(r.hidraulica_mwh), total), "", `${fmt(num(r.hidraulica_mwh))} MWh`),
     tile("Térmica", pct(num(r.termica_mwh), total), "", `${fmt(num(r.termica_mwh))} MWh`),
     tile("Demanda máxima", fmt(num(r.demanda_max_mw)), "MW", r.hora_demanda_max ? `a las ${r.hora_demanda_max}` : ""),
@@ -430,7 +454,7 @@ function renderDia() {
       `import. ${fmt(num(r.importacion_mwh))} · export. ${fmt(num(r.exportacion_mwh))}`),
   );
 
-  const curva = estado.curva.filter((f) => f.fecha === fecha);
+  const curva = base.curva.filter((f) => f.fecha === fecha);
   const horas = curva.map((f) => f.hora);
   const capas = [
     { k: "hidraulica_mw", n: "Hidráulica", c: "--serie-hidro" },
@@ -451,7 +475,11 @@ function renderDia() {
     type: "scatter", mode: "lines", name: "Demanda nacional", x: horas, y: curva.map((f) => num(f.demanda_nacional_mw)),
     line: { color: css("--tinta"), width: 2 }, hovertemplate: "Demanda nacional: %{y:,.0f} MW<extra></extra>",
   });
-  dibujar("g-curva", trazas, layoutBase({ xaxis: { ...layoutBase().xaxis, type: "category", nticks: 12 } }), {
+  // Eje de 24 horas también en los días preliminares, para que se vea que la curva está incompleta.
+  const horasDelDia = Array.from({ length: 48 }, (_, i) => `${String(Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`);
+  dibujar("g-curva", trazas, layoutBase({
+    xaxis: { ...layoutBase().xaxis, type: "category", nticks: 12, categoryorder: "array", categoryarray: horasDelDia, range: [-0.5, 47.5] },
+  }), {
     columnas: [
       { clave: "hora", titulo: "Hora" },
       ...capas.map((s) => ({ clave: s.k, titulo: `${s.n} (MW)`, fmt: (v) => fmt(num(v)) })),
@@ -461,7 +489,7 @@ function renderDia() {
     filas: curva,
   });
 
-  const detalle = estado.detalle.filter((f) => f.fecha === fecha);
+  const detalle = base.detalle.filter((f) => f.fecha === fecha);
   const barras = (grupo, id, colorDe) => {
     const filas = detalle.filter((f) => f.grupo === grupo).sort((a, b) => num(a.mwh) - num(b.mwh));
     dibujar(id, [{
@@ -486,7 +514,7 @@ function renderDia() {
   enlace.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" }));
   enlace.download = `cenace_curva_${fecha}.csv`;
 
-  const fechas = estado.resumen.map((f) => f.fecha);
+  const fechas = diasConsulta();
   const i = fechas.indexOf(fecha);
   document.getElementById("dia-anterior").disabled = i <= 0;
   document.getElementById("dia-siguiente").disabled = i >= fechas.length - 1;
@@ -990,10 +1018,12 @@ function iniciarControles() {
   sincronizarDrill();
 
   const selDia = document.getElementById("dia");
-  selDia.replaceChildren(...[...estado.resumen].reverse().map((f) => el("option", { value: f.fecha }, fechaLarga(f.fecha))));
+  const preliminares = diasPreliminares();
+  selDia.replaceChildren(...diasConsulta().reverse().map((f) => el("option", { value: f },
+    `${fechaLarga(f)}${preliminares.includes(f) ? " (preliminar)" : ""}`)));
   selDia.addEventListener("change", () => { estado.dia = selDia.value; renderDia(); });
   const mover = (paso) => {
-    const fechas = estado.resumen.map((f) => f.fecha);
+    const fechas = diasConsulta();
     const i = fechas.indexOf(estado.dia) + paso;
     if (i >= 0 && i < fechas.length) { estado.dia = fechas[i]; selDia.value = estado.dia; renderDia(); }
   };
@@ -1085,10 +1115,12 @@ async function cargar() {
   } catch { /* sin almacenamiento */ }
 
   const texto = (ruta) => fetch(ruta, { cache: "no-cache" }).then((r) => (r.ok ? r.text() : ""));
-  const [resumen, curva, detalle, mensual, anual, operativo, hidro, huecos, meta] = await Promise.all([
+  const [resumen, curva, detalle, mensual, anual, operativo, hidro, huecos, trResumen, trCurva, trDetalle, meta] = await Promise.all([
     texto("data/diario_resumen.csv"), texto("data/diario_curva.csv"), texto("data/diario_detalle.csv"),
     texto("data/mensual_tecnologia.csv"), texto("data/anual_produccion.csv"), texto("data/mensual_operativo.csv"),
-    texto("data/hidrologia.csv"), texto("data/diario_huecos.csv"), texto("data/meta.json"),
+    texto("data/hidrologia.csv"), texto("data/diario_huecos.csv"),
+    texto("data/tiempo_real_resumen.csv"), texto("data/tiempo_real_curva.csv"), texto("data/tiempo_real_detalle.csv"),
+    texto("data/meta.json"),
   ]);
   Object.assign(estado, {
     resumen: resumen ? parseCSV(resumen).sort((a, b) => a.fecha.localeCompare(b.fecha)) : [],
@@ -1097,6 +1129,9 @@ async function cargar() {
     operativo: operativo ? parseCSV(operativo) : [],
     hidro: hidro ? parseCSV(hidro).sort((a, b) => a.fecha.localeCompare(b.fecha)) : [],
     huecos: huecos ? parseCSV(huecos) : [],
+    tr: {
+      resumen: trResumen ? parseCSV(trResumen) : [], curva: trCurva ? parseCSV(trCurva) : [], detalle: trDetalle ? parseCSV(trDetalle) : [],
+    },
     meta: meta ? JSON.parse(meta) : null,
   });
 
