@@ -1,14 +1,14 @@
 {
-  "actualizado_utc": "2026-11-06T15:54:08Z",
+  "actualizado_utc": "2026-11-06T21:28:24Z",
   "fuente": "https://www.cenace.gob.ec/info-operativa/InformacionOperativa.htm",
   "diario": {
-    "dias": 7,
+    "dias": 8,
     "desde": "2026-10-25",
-    "hasta": "2026-11-03"
+    "hasta": "2026-11-05"
   },
   "mensual": {
-    "meses": 199,
+    "meses": 201,
     "desde": "2010-01",
-    "hasta": "2026-07"
+    "hasta": "2026-09"
   }
 }
