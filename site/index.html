@@ -129,6 +129,7 @@
       <div class="dos-columnas">
         <article class="tarjeta">
           <header><h2>Caudal de entrada a Mazar <span class="unidad">m³/s, media de 7 días, escala log.</span></h2><button class="boton-fantasma ver-tabla" data-grafico="g-caudal">Ver tabla</button></header>
+          <p class="nota pista">La línea roja (30 m³/s) equivale a 50 m³/s en toda la cuenca del Paute; la punteada (40), a 60.</p>
           <div id="g-caudal" class="grafico grafico-bajo"></div>
         </article>
         <article class="tarjeta">
@@ -142,12 +143,13 @@
       </article>
       <details class="tarjeta metodologia">
         <summary>Cómo se calculan las alertas</summary>
-        <p>Cada indicador compara el dato más reciente con <strong>la misma fecha de años anteriores</strong>, porque el agua y la térmica tienen estaciones marcadas. Años de referencia: <strong>2023 y 2024</strong> (racionamientos y apagones) y, como años normales, 2020, 2021, 2022 y 2025.</p>
+        <p>Salvo el caudal de entrada a Mazar, cada indicador compara el dato más reciente con <strong>la misma fecha de años anteriores</strong>, porque el agua y la térmica tienen estaciones marcadas. Años de referencia: <strong>2023 y 2024</strong> (racionamientos y apagones) y, como años normales, 2020, 2021, 2022 y 2025.</p>
         <ul>
-          <li><strong>Normal:</strong> el dato está dentro de lo observado en años normales, o no es claramente peor que todos ellos. Para eso hay una holgura de 1 m en la cota, 10 % en los caudales y 1 punto en la participación térmica. Con Mazar a menos de 5 m de su máximo histórico tampoco hay alarma.</li>
+          <li><strong>Normal:</strong> el dato está dentro de lo observado en años normales, o no es claramente peor que todos ellos. Para eso hay una holgura de 1 m en la cota, 10 % en el caudal del río Coca y 1 punto en la participación térmica. Con Mazar a menos de 5 m de su máximo histórico tampoco hay alarma.</li>
           <li><strong>Vigilancia:</strong> es claramente peor que todos los años normales, pero mejor que los de crisis.</li>
           <li><strong>Alerta:</strong> es claramente peor que los años normales e igual o peor que al menos uno de los años de crisis en esa fecha.</li>
           <li><strong>Límite operativo de Mazar: 2.115 msnm.</strong> En 2023 el embalse se sostuvo justo encima (racionamientos); en 2024 estuvo 67 días por debajo (apagones de abril y de octubre a diciembre). Con Mazar a 3 m o menos del límite, el nivel está en alerta sin importar la fecha.</li>
+          <li><strong>Caudal de entrada a Mazar (media de 14 días):</strong> alerta bajo 30 m³/s y vigilancia bajo 40, con umbrales fijos. El criterio de referencia es la cuenca del Paute bajo 50 m³/s. Entre 2020 y 2025, cuando la cuenca estaba en 50, a Mazar entraban unos 30 m³/s, y con 60 en la cuenca, unos 40. Se usa la entrada a Mazar porque desde el 21 de diciembre de 2025 CELEC publica para la cuenca del Paute el mismo valor que para Mazar. No se compara con otros años porque noviembre de 2020, un año normal, fue más seco que 2026 y hacía parecer normal un caudal bajo.</li>
           <li><strong>Días hasta 2.115 msnm:</strong> se proyecta la caída de la cota con el ritmo de los últimos 14 días y con el de los últimos 30, y se usa el más rápido, para no ocultar una caída sostenida tras unos días de pausa. Alerta si son menos de 30 días; vigilancia si son menos de 90.</li>
           <li><strong>Estado general:</strong> sale solo de los cuatro indicadores de agua. Alerta si el nivel de Mazar está en alerta o hay dos o más en alerta; vigilancia si hay alguno en alerta o dos o más en vigilancia. La dependencia térmica se muestra como contexto: indica cuánto se apoya el sistema en la térmica, no cuánta agua hay.</li>
         </ul>
@@ -155,6 +157,7 @@
         <ul>
           <li>El nivel de Mazar habría marcado alerta todo abril de 2024 y 117 de los 122 días de septiembre a diciembre de 2024. En 2025, un año normal, solo 9 de 365 días.</li>
           <li>"Días hasta 2.115" habría avisado 23 días antes de que Mazar bajara de 2.118 en 2023, 57 días antes en marzo de 2024 y 16 días antes en septiembre de 2024. En 2025 no tuvo días de alerta.</li>
+          <li>El caudal de entrada a Mazar habría estado en alerta 75 días en 2023 y 135 en 2024, frente a 0 en 2021 y 16 en 2025. También 28 días en 2020 y 43 en 2022, épocas secas de años considerados normales.</li>
         </ul>
         <p>Es un semáforo indicativo, no una evaluación oficial. Mira solo Mazar y el río Coca (no todos los embalses), usa la altura del embalse y no su volumen, y una participación térmica alta también puede ser una decisión deliberada para ahorrar agua. Hidrología: API de CELEC, vía el repositorio <a href="https://github.com/jp1309/celec" rel="noopener">jp1309/celec</a>; el caudal del río Coca suele publicarse con unos días de atraso. Térmica: serie mensual oficial y acumulado del mes de CENACE.</p>
       </details>
