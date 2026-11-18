@@ -711,13 +711,10 @@ function clasificar(valor, refs, { mayorEsMejor = true, holgura = 0, relativa = 
 const REGLA_COTA = { holgura: 1 };
 const REGLA_CAUDAL = { holgura: 0.1, relativa: true };
 const REGLA_TERMICA = { mayorEsMejor: false, holgura: 0.01 };
-// Caudal de entrada a Mazar: umbrales fijos, no comparación con otros años (noviembre de 2020, un año
-// "normal", fue más seco que 2026 y hacía parecer normal un caudal bajo). El criterio conocido es la
-// cuenca del Paute bajo 50 m³/s; con la media de 14 días de 2020–2025, eso equivale a unos 30 m³/s de
-// entrada a Mazar (y 60 en la cuenca, a unos 40). Desde el 2025-12-21 la cuenca en jp1309/celec repite
-// el caudal de Mazar: su script de descarga pide el mismo mrid (30538) para las dos. CELEC sí publica
-// la cuenca, en sardomcsr/csrCaudCuenMesAvg.
-const UMBRAL_CAUDAL_MAZAR = { alerta: 30, vigilancia: 40, cuencaAlerta: 50, cuencaVigilancia: 60 };
+// Caudal de la cuenca del río Paute (Mazar más la cuenca intermedia hasta Amaluza): umbrales fijos,
+// criterio del usuario (bajo 50 m³/s es un problema). No se compara con otros años: noviembre de 2020,
+// un año "normal", fue más seco que 2026 y hacía parecer normal un caudal bajo.
+const UMBRAL_CAUDAL_PAUTE = { alerta: 50, vigilancia: 60 };
 
 const promedio = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const difTexto = (d, ref, unidad, dec = 1) => `${fmt(Math.abs(d), dec)} ${unidad} ${d >= 0 ? "sobre" : "bajo"} ${ref}`;
@@ -793,8 +790,8 @@ function indicadoresAlerta() {
     }
   }
 
-  // 2 y 4. Caudales: media de 14 días. Mazar, contra umbrales fijos; el Coca, frente a la misma
-  // ventana de otros años.
+  // 2 y 4. Caudales: media de 14 días. La cuenca del Paute, contra umbrales fijos; el Coca, frente a
+  // la misma ventana de otros años.
   const caudal = (col, titulo, umbral = null) => {
     const f = ultimaCon(col);
     if (!f) return null;
@@ -808,13 +805,13 @@ function indicadoresAlerta() {
     return {
       titulo, valor: fmt(v), unidad: "m³/s", fecha: f,
       estado: umbral ? estadoUmbral(v) : clasificar(v, refs, REGLA_CAUDAL),
-      detalle: [umbral ? `Alerta bajo ${fmt(umbral.alerta)} (≈ ${fmt(umbral.cuencaAlerta)} en la cuenca del Paute), vigilancia bajo ${fmt(umbral.vigilancia)}` : "",
+      detalle: [umbral ? `Alerta bajo ${fmt(umbral.alerta)}, vigilancia bajo ${fmt(umbral.vigilancia)}` : "",
         de(refs, "2024") != null ? `2024: ${fmt(de(refs, "2024"))}` : "",
         normales.length ? `${etiquetaNormal}: ${fmt(normalesDe(refs))}` : ""].filter(Boolean).join(" · ") +
         ` (media de 14 días)${recientes != null ? ` · últimos 3 días: ${fmt(recientes)}` : ""}`,
     };
   };
-  out.caudal = caudal("mazar_caudal_m3s", "Caudal de entrada a Mazar", UMBRAL_CAUDAL_MAZAR);
+  out.caudal = caudal("paute_caudal_m3s", "Caudal de la cuenca del Paute", UMBRAL_CAUDAL_PAUTE);
   out.coca = caudal("coca_caudal_m3s", "Caudal del río Coca");
 
   // 5. Dependencia térmica del mes frente al mismo mes de otros años.
@@ -909,23 +906,24 @@ function renderAlerta() {
   ]));
 
   const media7 = (col) => (f) => mediaVentana(porFecha, f.fecha, 7, col);
-  const caudal = porAnio("mazar_caudal_m3s", media7("mazar_caudal_m3s"));
+  const caudal = porAnio("paute_caudal_m3s", media7("paute_caudal_m3s"));
   caudal.forEach((t) => { t.hovertemplate = `${t.name}: %{y:,.0f} m³/s<extra></extra>`; });
   // Umbrales de alerta y vigilancia como trazas (en eje logarítmico es más seguro que shapes).
   const lineaUmbral = (y, color, dash, texto) => ({
     type: "scatter", mode: "lines", x: ["2000-01-01", "2000-12-31"], y: [y, y], showlegend: false, hoverinfo: "skip",
     line: { color, width: 1.5, dash }, name: texto,
   });
-  const U = UMBRAL_CAUDAL_MAZAR;
+  const U = UMBRAL_CAUDAL_PAUTE;
   caudal.unshift(lineaUmbral(U.vigilancia, css("--estado-vigilancia"), "dash"), lineaUmbral(U.alerta, css("--estado-alerta"), "solid"));
   dibujar("g-caudal", caudal, layoutBase({
-    xaxis: ejeAnio, yaxis: { ...layoutBase().yaxis, type: "log", tickvals: [5, 10, 20, 30, 40, 50, 100, 200, 500], rangemode: "normal" },
+    xaxis: ejeAnio, yaxis: { ...layoutBase().yaxis, type: "log", tickvals: [10, 20, 30, 50, 60, 100, 200, 500], rangemode: "normal" },
     // En ejes logarítmicos, la posición y de las anotaciones va en log10.
     annotations: [{ xref: "paper", x: 0.01, y: Math.log10(U.alerta), yanchor: "top", xanchor: "left", showarrow: false,
-      text: `Alerta: ${fmt(U.alerta)} m³/s (≈ ${fmt(U.cuencaAlerta)} en la cuenca del Paute)`, font: { color: css("--tinta-2"), size: 11 } }],
+      text: `Alerta: ${fmt(U.alerta)} m³/s`, font: { color: css("--tinta-2"), size: 11 } }],
   }), tablaReciente([
-    { clave: "mazar_caudal_m3s", titulo: `Caudal ${actual} (m³/s)`, fmt: (v) => fmt(num(v), 1) },
-    ...ANIOS_CRISIS.map((a) => ({ clave: `_${a}`, titulo: `Misma fecha ${a}`, fmt: (_, f) => fmt(num(porFecha.get(mismaFecha(f.fecha, a))?.mazar_caudal_m3s), 1) })),
+    { clave: "paute_caudal_m3s", titulo: `Cuenca ${actual} (m³/s)`, fmt: (v) => fmt(num(v), 1) },
+    { clave: "mazar_caudal_m3s", titulo: `Entrada a Mazar ${actual}`, fmt: (v) => fmt(num(v), 1) },
+    ...ANIOS_CRISIS.map((a) => ({ clave: `_${a}`, titulo: `Cuenca, misma fecha ${a}`, fmt: (_, f) => fmt(num(porFecha.get(mismaFecha(f.fecha, a))?.paute_caudal_m3s), 1) })),
   ]));
 
   const coca = porAnio("coca_caudal_m3s", media7("coca_caudal_m3s"));

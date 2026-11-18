@@ -191,6 +191,9 @@ class TestHidrologia(unittest.TestCase):
         "date,year,doy365,mmdd,series,metric,value,is_placeholder\n"
         "2026-10-27,2026,300,27-oct,Mazar,Cota (msnm),2123.37,0\n"
         "2026-10-27,2026,300,27-oct,Mazar,Caudal (m³/s),27.5,0\n"
+        "2026-10-27,2026,300,27-oct,Cuenca del Rio Paute,Caudal (m³/s),48.2,0\n"
+        "2026-10-20,2026,293,20-oct,Mazar,Caudal (m³/s),30.1,0\n"
+        "2026-10-20,2026,293,20-oct,Cuenca del Rio Paute,Caudal (m³/s),30.1,0\n"
         "2026-10-27,2026,300,27-oct,Molino,Cota (msnm),1980.1,0\n"
         "2020-08-31,2020,244,31-ago,Mazar,Cota (msnm),0.0,0\n"
         "2026-10-30,2026,303,30-oct,Mazar,Cota (msnm),2122.0,1\n"
@@ -208,6 +211,9 @@ class TestHidrologia(unittest.TestCase):
             self.assertEqual(sorted(por_fecha), ["2026-10-20", "2026-10-27"])
             self.assertEqual(por_fecha["2026-10-27"]["mazar_cota_msnm"], "2123.37")
             self.assertEqual(por_fecha["2026-10-27"]["mazar_caudal_m3s"], "27.5")
+            self.assertEqual(por_fecha["2026-10-27"]["paute_caudal_m3s"], "48.2")
+            # Una cuenca idéntica a Mazar es una copia (error de la fuente) y se deja vacía.
+            self.assertEqual(por_fecha["2026-10-20"]["paute_caudal_m3s"], "")
             self.assertEqual(por_fecha["2026-10-27"]["coca_caudal_m3s"], "")
             self.assertEqual(por_fecha["2026-10-20"]["coca_caudal_m3s"], "151.33")
 

@@ -87,7 +87,7 @@ SERIES_CURVA = {
 }
 GRUPOS_DETALLE = ["hidraulica", "termica_y_otras"]
 COMPONENTES_PRODUCCION = ["produccion_total", "hidraulica", "termica", "no_convencional", "importacion", "exportacion"]
-COLUMNAS_HIDROLOGIA = ["fecha", "mazar_cota_msnm", "mazar_caudal_m3s", "coca_caudal_m3s"]
+COLUMNAS_HIDROLOGIA = ["fecha", "mazar_cota_msnm", "mazar_caudal_m3s", "coca_caudal_m3s", "paute_caudal_m3s"]
 # Capturas de tiempo real: desde esta hora de la curva ya incluyen el pico de la noche que empieza.
 # Antes de eso aportan poco y solo llenarían el historial con commits.
 HORA_MINIMA_CAPTURA = "18:00"
@@ -616,7 +616,7 @@ def _escribir_si_cambia(ruta: Path, columnas: list[str], filas: list[dict]) -> b
 # --------------------------------------------------------------------------- hidrología (repo jp1309/celec)
 
 def actualizar_hidrologia(contenido_hidro: bytes, contenido_coca: bytes, datos: Path = DATOS) -> bool:
-    """Guarda en hidrologia.csv la cota y el caudal de Mazar y el caudal del río Coca.
+    """Guarda en hidrologia.csv la cota y el caudal de Mazar y los caudales de la cuenca del Paute y del río Coca.
 
     Los datos vienen de los CSV que publica el repositorio jp1309/celec (API de CELEC).
     Algunos valores en 0 de la fuente son datos faltantes y se dejan vacíos.
@@ -631,13 +631,20 @@ def actualizar_hidrologia(contenido_hidro: bytes, contenido_coca: bytes, datos: 
         if numero > 0:
             filas.setdefault(fecha, {"fecha": fecha})[columna] = _fmt(numero)
 
-    columnas_celec = {("Mazar", "Cota (msnm)"): "mazar_cota_msnm", ("Mazar", "Caudal (m³/s)"): "mazar_caudal_m3s"}
+    columnas_celec = {("Mazar", "Cota (msnm)"): "mazar_cota_msnm", ("Mazar", "Caudal (m³/s)"): "mazar_caudal_m3s",
+                      ("Cuenca del Rio Paute", "Caudal (m³/s)"): "paute_caudal_m3s"}
     for r in csv.DictReader(io.StringIO(contenido_hidro.decode("utf-8-sig"))):
         columna = columnas_celec.get((r.get("series"), r.get("metric")))
         if columna and r.get("is_placeholder", "0") in ("0", "", "False", "false"):
             poner(r["date"], columna, r.get("value"))
     for r in csv.DictReader(io.StringIO(contenido_coca.decode("utf-8-sig"))):
         poner(r["date"], "coca_caudal_m3s", r.get("coca"))
+    # La cuenca del Paute (Mazar + cuenca intermedia hasta Amaluza) siempre trae más agua que Mazar.
+    # Si llega idéntica, es una copia de Mazar (pasó en jp1309/celec del 2025-12-21 al 2026-11-18)
+    # y se deja vacía.
+    for fila in filas.values():
+        if fila.get("paute_caudal_m3s") and fila.get("paute_caudal_m3s") == fila.get("mazar_caudal_m3s"):
+            del fila["paute_caudal_m3s"]
     return _escribir_si_cambia(datos / "hidrologia.csv", COLUMNAS_HIDROLOGIA, [filas[k] for k in sorted(filas)])
 
 
