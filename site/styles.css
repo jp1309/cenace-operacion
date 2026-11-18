@@ -188,6 +188,11 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
 .tile .valor { font-size: 1.6rem; font-weight: 650; line-height: 1.2; margin-top: 2px; }
 .tile .valor small { font-size: 0.9rem; font-weight: 500; color: var(--tinta-2); margin-left: 4px; }
 .tile .detalle { color: var(--tinta-tenue); font-size: 0.8rem; margin-top: 2px; }
+.tile .racha { color: var(--tinta); font-size: 0.85rem; font-weight: 600; margin-top: 2px; }
+.tile .combinada {
+  margin-top: 8px; padding: 6px 8px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; color: var(--tinta);
+  background: color-mix(in srgb, var(--estado-alerta) 14%, transparent); border-left: 3px solid var(--estado-alerta);
+}
 
 .tarjeta {
   background: var(--superficie); border: 1px solid var(--borde); border-radius: 10px; padding: 14px 16px 8px;

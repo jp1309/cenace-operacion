@@ -715,6 +715,11 @@ const REGLA_TERMICA = { mayorEsMejor: false, holgura: 0.01 };
 // criterio del usuario (bajo 50 m³/s es un problema). No se compara con otros años: noviembre de 2020,
 // un año "normal", fue más seco que 2026 y hacía parecer normal un caudal bajo.
 const UMBRAL_CAUDAL_PAUTE = { alerta: 50, vigilancia: 60 };
+// Combinación de riesgo: cuenca bajo 50 con Mazar a menos de 20 m del límite (bajo 2.135). Con datos de
+// 2020–2026 no se dio nunca en 2020, 2021 ni 2025; sí en dic-2022/ene-2023 (Mazar bajó a 2.119,6), en
+// 2023 y en 2024, y avisó 21 días (2023) y 15 días (sep-2024) antes de que Mazar bajara de 2.118.
+// Una cota más alta (2.140) agrega alarmas en años sin crisis (2020, 2025); una más baja avisa más tarde.
+const MARGEN_COMBINADO = 20;
 
 const promedio = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const difTexto = (d, ref, unidad, dec = 1) => `${fmt(Math.abs(d), dec)} ${unidad} ${d >= 0 ? "sobre" : "bajo"} ${ref}`;
@@ -723,6 +728,11 @@ function tileEstado(ind) {
   const e = ESTADOS[ind.estado];
   const nodo = tile(ind.titulo, ind.valor, ind.unidad, ind.detalle);
   nodo.classList.add("estado");
+  if (ind.racha) nodo.querySelector(".valor").after(el("div", { class: "racha" }, ind.racha));
+  if (ind.combinada) {
+    nodo.append(el("div", { class: "combinada" },
+      `Combinación de riesgo: cuenca bajo ${fmt(UMBRAL_CAUDAL_PAUTE.alerta)} con Mazar bajo ${fmt(LIMITE_MAZAR + MARGEN_COMBINADO)} msnm`));
+  }
   if (e) {
     nodo.classList.add(ind.estado);
     nodo.append(el("div", { class: "estado-etiqueta" },
@@ -812,6 +822,25 @@ function indicadoresAlerta() {
     };
   };
   out.caudal = caudal("paute_caudal_m3s", "Caudal de la cuenca del Paute", UMBRAL_CAUDAL_PAUTE);
+  if (out.caudal) {
+    // Días seguidos con la media de 14 días bajo un umbral, hacia atrás desde la última fecha.
+    const seguidos = (umbral) => {
+      let n = 0;
+      for (let d = out.caudal.fecha; ; d = sumarDias(d, -1)) {
+        const v = mediaVentana(porFecha, d, 14, "paute_caudal_m3s");
+        if (v == null || v >= umbral) return n;
+        n++;
+      }
+    };
+    const U = UMBRAL_CAUDAL_PAUTE;
+    const bajoAlerta = seguidos(U.alerta);
+    const bajoVigilancia = bajoAlerta ? 0 : seguidos(U.vigilancia);
+    const dias = (n) => `${fmt(n)} ${n === 1 ? "día" : "días seguidos"}`;
+    out.caudal.racha = bajoAlerta ? `${dias(bajoAlerta)} bajo ${fmt(U.alerta)}`
+      : bajoVigilancia ? `${dias(bajoVigilancia)} bajo ${fmt(U.vigilancia)}` : `Sobre ${fmt(U.vigilancia)}`;
+    const cotaMazar = fC ? num(porFecha.get(fC).mazar_cota_msnm) : null;
+    out.caudal.combinada = bajoAlerta > 0 && cotaMazar != null && cotaMazar < LIMITE_MAZAR + MARGEN_COMBINADO;
+  }
   out.coca = caudal("coca_caudal_m3s", "Caudal del río Coca");
 
   // 5. Dependencia térmica del mes frente al mismo mes de otros años.
@@ -846,7 +875,7 @@ function renderAlerta() {
   // El estado general sale solo de los indicadores de agua; la térmica es contexto.
   const hidricos = lista.filter((i) => !i.contexto);
   const cuenta = (e) => hidricos.filter((i) => i.estado === e).length;
-  const general = ind.cota?.estado === "alerta" || cuenta("alerta") >= 2 ? "alerta"
+  const general = ind.cota?.estado === "alerta" || ind.caudal?.combinada || cuenta("alerta") >= 2 ? "alerta"
     : cuenta("alerta") >= 1 || cuenta("vigilancia") >= 2 ? "vigilancia" : "normal";
   const partes = [["alerta", "en alerta", "en alerta"], ["vigilancia", "en vigilancia", "en vigilancia"], ["normal", "normal", "normales"]]
     .filter(([e]) => cuenta(e)).map(([e, uno, varios]) => `${cuenta(e)} ${cuenta(e) === 1 ? uno : varios}`);
@@ -859,6 +888,7 @@ function renderAlerta() {
       el("h2", {}, `Estado general: ${ESTADOS[general].texto}`),
       el("p", {}, (margen != null ? `Mazar está ${fmt(Math.abs(margen), 1)} m ${margen >= 0 ? "sobre" : "bajo"} su límite operativo de ${fmt(LIMITE_MAZAR)} msnm. ` : "") +
         `De ${hidricos.length} indicadores de agua: ${partes.join(", ")}.` +
+        (ind.caudal?.combinada ? ` La cuenca del Paute está bajo ${fmt(UMBRAL_CAUDAL_PAUTE.alerta)} m³/s con Mazar bajo ${fmt(LIMITE_MAZAR + MARGEN_COMBINADO)} msnm, la combinación que antecedió a las crisis de 2023 y 2024.` : "") +
         (parecido ? ` En esta fecha, la cota se parece más a la de ${parecido.anio} (${fmt(parecido.valor, 1)} msnm).` : ""))),
   );
   document.getElementById("tiles-alerta").replaceChildren(...lista.map(tileEstado));
