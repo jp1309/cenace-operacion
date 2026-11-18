@@ -714,8 +714,9 @@ const REGLA_TERMICA = { mayorEsMejor: false, holgura: 0.01 };
 // Caudal de entrada a Mazar: umbrales fijos, no comparación con otros años (noviembre de 2020, un año
 // "normal", fue más seco que 2026 y hacía parecer normal un caudal bajo). El criterio conocido es la
 // cuenca del Paute bajo 50 m³/s; con la media de 14 días de 2020–2025, eso equivale a unos 30 m³/s de
-// entrada a Mazar (y 60 en la cuenca, a unos 40). CELEC dejó de publicar la cuenca por separado el
-// 2025-12-21: desde entonces repite el caudal de Mazar.
+// entrada a Mazar (y 60 en la cuenca, a unos 40). Desde el 2025-12-21 la cuenca en jp1309/celec repite
+// el caudal de Mazar: su script de descarga pide el mismo mrid (30538) para las dos. CELEC sí publica
+// la cuenca, en sardomcsr/csrCaudCuenMesAvg.
 const UMBRAL_CAUDAL_MAZAR = { alerta: 30, vigilancia: 40, cuencaAlerta: 50, cuencaVigilancia: 60 };
 
 const promedio = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
